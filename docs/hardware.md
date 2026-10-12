@@ -33,6 +33,7 @@ Sources, read on 2026-10-12:
 | Calibration, temperature | `T0_degC_x8` 0x32, `T1_degC_x8` 0x33 (value ÷ 8 = °C), ten bits each: bits 1:0 of 0x35 extend `T0`, bits 3:2 extend `T1`; `T0_OUT` 0x3C–0x3D, `T1_OUT` 0x3E–0x3F (signed 16-bit LE) | kernel `hts221_core.c:37–41, 259–300` |
 | Sub-address auto-increment | the **MSB** (0x80) of the register address, for both reads and writes | kernel `hts221_i2c.c:19, 24–25` (`read_flag_mask`, `write_flag_mask = BIT(7)`) |
 | Interpolation | linear between the two calibration points, humidity and temperature each | kernel `hts221_core.c:259–339` computes slope `(y1 − y0) / (x1 − x0)` |
+| Data-ready flags | `STATUS_REG` has only `T_DA` and `H_DA`: there is **no overrun bit**, so `FlagOverrun` is never set for the HTS221 | ST `hts221_reg.h:232–244` |
 | Division by zero | **not guarded by the kernel**: it divides by `cal_x1 − cal_x0` unchecked | kernel `hts221_core.c:294–296, 333–335` |
 
 The last row is why `Calibration.Validate` exists (G-12): the reference driver
@@ -47,6 +48,7 @@ reported in the field.
 | Operating range: humidity 0–100 %RH, temperature −40…+120 °C | `FlagOutOfRange` | datasheet front page; written from memory in the driver |
 | Whether reading the reserved registers 0x34, 0x38, 0x39 inside the 0x30–0x3F calibration block is harmless | the driver reads that block in one transaction | first transcript on the Pi (#30) |
 | Whether `ONE_SHOT` is ignored while `PD` = 0 | what the model does after a chip reset | datasheet; the model assumes it is ignored, which is the cautious reading |
+| Whether `ONE_SHOT` reads back 1 while a conversion is in progress and 0 once it ends | recovery after a timeout: the driver asks the chip whether a conversion is still pending instead of guessing whether it reset | datasheet (`CTRL_REG2` description); the ST header names the bit but not its read-back |
 | Whether a brown-out leaves `PD` = 0 (so the symptom is `ErrNotReady`) | reset recovery (ADR-0005) | observed only by cutting power to the HAT; otherwise it stays an inference |
 
 The LPS25H and LSM9DS1 facts, and everything about kernel ownership on the Pi,
