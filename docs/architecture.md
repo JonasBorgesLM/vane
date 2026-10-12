@@ -212,20 +212,39 @@ two sequences on one chip (ADR-0004). The same settling happens after a `Read`
 cut short by the context. (That `ONE_SHOT` reads back this way is listed in
 `docs/hardware.md` as still to confirm.)
 
-**LPS25H/LPS25HB** (`chip/lps25h`, `DefaultAddress = 0x5C`): `Sample` has
-`Pressure vane.Measurement[vane.Hectopascal]` instead of `Humidity`; no
-`Calibration` (the chip is factory-trimmed); `Rate` covers 1, 7, 12.5 and 25
-Hz; `func (s *Sensor) Variant() Variant` returns `VariantUnknown` unless the two
-can be told apart (ADR-0003). Pressure is a 24-bit two's-complement value and
-temperature a 16-bit one — **both sign-extended into `Raw`** before conversion.
+**LPS25H/LPS25HB** (`chip/lps25h`, `DefaultAddress = 0x5C`) is implemented, with
+the same shape and these differences:
 
-**Where the writable set lives (ADR-0007).** Not in the driver: each
-`vanetest` model declares the registers the datasheet allows the host to write,
-and fails the test on any other write. Exporting a `Writable()` list from the
-driver was considered and dropped — it would be public API with no consumer,
-and an oracle copied from the driver checks nothing (the same reason models do
-not import `chip/*`). This refines REQUIREMENTS §6.1's one-line summary of
-ADR-0007, which says "each driver declares".
+```go
+type Sample struct {
+	Pressure    vane.Measurement[vane.Hectopascal] // Raw: 24-bit, sign-extended
+	Temperature vane.Measurement[vane.Celsius]     // Raw: 16-bit signed
+}
+
+// Rate1Hz, Rate7Hz, Rate12Hz5, Rate25Hz: the ODR code, in bits 6:4 of CTRL_REG1.
+func (s *Sensor) Variant() Variant // always VariantUnknown: nothing readable tells the chips apart
+```
+
+- **No `Calibration`**: the chip is factory-trimmed. No `Averaging` and no
+  `WithAveraging`: the sample counts per `AVGP`/`AVGT` code are a conflict
+  between sources (`docs/hardware.md`), so `RES_CONF` is left as the chip has it
+  and `New` writes `CTRL_REG1` and nothing else.
+- **Flags**: `FlagOverrun` can be set (the status register has `P_OR` and
+  `T_OR`), per quantity, in continuous mode; `FlagStale` likewise from the
+  data-ready bits; `FlagOutOfRange` for pressure outside 260–1260 hPa and
+  temperature above 105 °C; `FlagClamped` is never set. There is no lower
+  temperature bound: a 16-bit count at 480 per degree around 42.5 °C cannot go
+  below −25.77 °C.
+- **Pressure sign**: the 24-bit output is two's complement, and
+  `Raw` is sign-extended so a differential reading below zero stays negative.
+- `Variant` is a type with one value, `VariantUnknown`. `VariantH` and
+  `VariantHB` are added if the board shows a difference that can be read without
+  side effects; adding them does not break callers.
+
+The two drivers repeat the same recovery, settle and close logic. Two copies
+cost less than a shared engine that would need a callback for every difference
+(status bits, output length, configuration, conversion); a third chip would
+change that.
 
 ### What a driver must not do
 
