@@ -677,6 +677,12 @@ translates it and applies what that review decided:
 | RNF-09 resolved (Go 1.26); R-09 and R-10 resolved. | `go.mod` and the module path exist (#54). |
 | Binding rule and §9 added; milestones mapped to M0–M6 with M1 ∥ M2. | Hardware recon no longer blocks work that does not need the Pi. |
 
+### Revisions after v0.2
+
+| Date | Change | Why |
+| --- | --- | --- |
+| 2026-10-12 | Appendix A: HTS221 data, calibration and the auto-increment bit moved to Confirmed | Read from the kernel driver and ST's reference header, not from memory; detail in [docs/hardware.md](docs/hardware.md) (#17, partly) |
+
 **ADR numbering, v0.1 → v0.2:** 0001 → 0001 · 0002 → 0002 · 0005 → 0003 ·
 0006 → 0004 · 0007 → 0005 · 0008 → 0006 · 0012 → 0007 · 0003, 0004, 0009, 0010 →
 `docs/architecture.md` · 0011 → deferred.
@@ -689,8 +695,8 @@ translates it and applies what that review decided:
 | --- | --- | --- | --- |
 | HTS221: address | 0x5F | Confirmed | `rpi-sense` overlay; Rust `sensehat` driver |
 | HTS221: WHO_AM_I | register 0x0F = 0xBC | Confirmed | Reference drivers (Nordic, mbed) and register map |
-| HTS221: data | humidity at 0x28, temperature at 0x2A (16-bit) | Probable | Register map (MrT) |
-| HTS221: calibration | block from 0x30 (H0_rH_x2 at 0x30, T0_degC_x8 at 0x32, T0/T1 high bits at 0x35) | Probable | Reference drivers; confirm in the datasheet |
+| HTS221: data | humidity at 0x28, temperature at 0x2A (16-bit signed, little-endian) | Confirmed | Kernel `hts221_core.c`; [docs/hardware.md](docs/hardware.md) |
+| HTS221: calibration | block from 0x30 (H0_rH_x2 at 0x30, T0_degC_x8 at 0x32, T0/T1 high bits at 0x35, `*_OUT` at 0x36, 0x3A, 0x3C, 0x3E) | Confirmed | Kernel `hts221_core.c` and ST `hts221_reg.h`; [docs/hardware.md](docs/hardware.md) |
 | HTS221: overlay | node exists but **disabled** | Confirmed | `rpi-sense-overlay.dts`, `rpi-sense-v2-overlay.dts` (rpi-6.12.y) |
 | LPS25H: address | 0x5C | Confirmed | Overlay; Rust driver |
 | LPS25H: WHO_AM_I | register 0x0F = 0xBD | Confirmed | ST header (with an internal inconsistency in a comment) and reference code |
@@ -707,7 +713,7 @@ translates it and applies what that review decided:
 | TCS3400 in the overlay | no node declared | Confirmed | v2 overlay |
 | LED/joystick microcontroller | 0x46; EEPROM write-protect register | Confirmed | Official Sense HAT documentation |
 | Pi 5: header bus | GPIO2/3 = i2c1 → normally `/dev/i2c-1` | Probable | pinout.xyz; confirm with `i2cdetect -l` |
-| ST block-read auto-increment bit | MSB of the sub-address | To confirm | Memory |
+| ST block-read auto-increment bit | MSB of the sub-address, for reads and writes | Confirmed (HTS221) | Kernel `hts221_i2c.c` (`read_flag_mask`, `write_flag_mask`); LPS25H still to confirm |
 
 ## Appendix B — Sanity check on the Pi 5
 
