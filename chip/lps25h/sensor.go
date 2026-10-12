@@ -2,6 +2,7 @@ package lps25h
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -36,10 +37,18 @@ type Sensor struct {
 	src vane.Source
 	cfg config
 
-	mu    sync.Mutex
-	out   [5]byte    // scratch for the output registers; guarded by mu
-	clk   poll.Clock // one timer, reused by every wait; guarded by mu
-	ready func(context.Context) (bool, error)
+	mu     sync.Mutex
+	out    [5]byte    // scratch for the output registers; guarded by mu
+	clk    poll.Clock // one timer, reused by every wait; guarded by mu
+	ready  func(context.Context) (bool, error)
+	closed bool
+	// reinit: the chip may have lost its configuration (a wait ended in
+	// ErrNotReady, which is how a reset shows in one-shot mode), so the next
+	// Read identifies and configures it again first.
+	reinit bool
+	// dirty: a one-shot conversion was triggered and its sample not read,
+	// because the read ended early. The next Read lets it finish first.
+	dirty bool
 }
 
 // New identifies the chip, then configures it. The order is the requirement:
@@ -95,13 +104,18 @@ func (s *Sensor) identify(ctx context.Context) error {
 	return nil
 }
 
-// configure powers the chip up for one-shot acquisition with block data update
-// on, in one write. BDU is on in every configuration (RF-06): without it a
-// multi-byte read can combine bytes of two different samples. SIM, RESET_AZ and
+// configure powers the chip up in the configured mode, in one write. BDU is on
+// in every configuration, in every mode and on every path (RF-06): without it a
+// multi-byte read can combine bytes of two different samples. In one-shot mode
+// ODR is 0; in continuous mode it is the rate, in bits 6:4. SIM, RESET_AZ and
 // DIFF_EN stay clear; differential mode would change what the pressure
 // registers mean.
 func (s *Sensor) configure(ctx context.Context) error {
-	if err := s.dev.Write(ctx, regCtrl1, ctrl1PD|ctrl1BDU); err != nil {
+	ctrl1 := uint8(ctrl1PD | ctrl1BDU)
+	if s.cfg.mode.continuous {
+		ctrl1 |= uint8(s.cfg.mode.rate) << ctrl1ODRShift
+	}
+	if err := s.dev.Write(ctx, regCtrl1, ctrl1); err != nil {
 		return s.fail("configure", regCtrl1, err)
 	}
 	return nil
@@ -111,27 +125,139 @@ func (s *Sensor) fail(op string, reg uint8, err error) error {
 	return &vane.SensorError{Source: s.src, Op: op, Reg: reg, HasReg: true, Err: err}
 }
 
-// Read triggers one conversion, waits for it, and returns the result. The
-// sample is always new, and the chip idles between reads.
+func (s *Sensor) closedError(op string) error {
+	return &vane.SensorError{Source: s.src, Op: op, Err: vane.ErrClosed}
+}
+
+// Read returns one sample. In one-shot mode, the default, it triggers a
+// conversion, waits for it and reads the result, so the sample is always new and
+// the chip idles between reads. In continuous mode it returns the chip's latest
+// sample, with a quantity flagged vane.FlagStale if it is not newer than the
+// previous one and vane.FlagOverrun if the chip says it was overwritten.
 //
 // Read stops waiting when ctx ends, but a transaction already on the bus cannot
 // be interrupted, so cancellation takes effect after at most one transaction
-// and one poll interval (RNF-05).
+// and one poll interval (RNF-05). After Close it returns vane.ErrClosed. If the
+// chip stops answering a trigger, Read returns vane.ErrNotReady and the next
+// Read configures the chip again, which is how a reset is recovered from; Read
+// does not retry, that is the caller's decision (G-11).
 func (s *Sensor) Read(ctx context.Context) (Sample, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.closed {
+		return Sample{}, s.closedError("read")
+	}
+	if s.reinit {
+		if err := s.identify(ctx); err != nil {
+			return Sample{}, err
+		}
+		if err := s.configure(ctx); err != nil {
+			return Sample{}, err
+		}
+		s.reinit = false
+		// Whether a conversion is still pending is the chip's to say: ONE_SHOT
+		// reads 1 until the conversion ends. A chip that was reset reads 0 and
+		// holds nothing; one that merely stalled still reads 1, and a second
+		// trigger on top of it would be two sequences on one chip.
+		cr2, err := s.dev.Read(ctx, regCtrl2)
+		if err != nil {
+			return Sample{}, s.fail("configure", regCtrl2, err)
+		}
+		s.dirty = cr2&ctrl2OneShot != 0
+	}
+	if s.cfg.mode.continuous {
+		return s.readLatest(ctx)
+	}
+	return s.readOneShot(ctx)
+}
+
+func (s *Sensor) readOneShot(ctx context.Context) (Sample, error) {
+	if s.dirty {
+		// An earlier read ended after the trigger and before the result. Its
+		// conversion is still running or finished, and a second trigger on top of
+		// it is two sequences on one chip. Let it end and take the sample out.
+		if err := s.wait(ctx); err != nil {
+			return Sample{}, err
+		}
+		if err := s.dev.ReadBlock(ctx, regOut, s.out[:]); err != nil {
+			return Sample{}, s.fail("read", regOut, err)
+		}
+		s.dirty = false
+	}
 	if err := s.dev.Write(ctx, regCtrl2, ctrl2OneShot); err != nil {
 		return Sample{}, s.fail("trigger", regCtrl2, err)
 	}
-	if err := poll.Until(ctx, s.clk, s.cfg.pollInterval, s.cfg.readyTimeout, s.ready); err != nil {
-		return Sample{}, s.fail("wait", regStatus, err)
+	s.dirty = true
+	if err := s.wait(ctx); err != nil {
+		return Sample{}, err
 	}
 	now := s.cfg.now()
 	if err := s.dev.ReadBlock(ctx, regOut, s.out[:]); err != nil {
 		return Sample{}, s.fail("read", regOut, err)
 	}
-	return s.sample(now), nil
+	s.dirty = false
+	return s.sample(now, 0, 0), nil
+}
+
+// readLatest returns the chip's latest sample. A data-ready bit that is not set
+// means that quantity has no sample newer than the one last read; an overrun bit
+// that is set means a sample of it was overwritten before it was read.
+func (s *Sensor) readLatest(ctx context.Context) (Sample, error) {
+	st, err := s.dev.Read(ctx, regStatus)
+	if err != nil {
+		return Sample{}, s.fail("read", regStatus, err)
+	}
+	now := s.cfg.now()
+	if err := s.dev.ReadBlock(ctx, regOut, s.out[:]); err != nil {
+		return Sample{}, s.fail("read", regOut, err)
+	}
+	var pExtra, tExtra vane.Flag
+	if st&statusPDA == 0 {
+		pExtra |= vane.FlagStale
+	}
+	if st&statusPOR != 0 {
+		pExtra |= vane.FlagOverrun
+	}
+	if st&statusTDA == 0 {
+		tExtra |= vane.FlagStale
+	}
+	if st&statusTOR != 0 {
+		tExtra |= vane.FlagOverrun
+	}
+	return s.sample(now, pExtra, tExtra), nil
+}
+
+// wait blocks until both data-ready bits are set. A timeout means the chip never
+// finished, which after a trigger is what a chip that reset looks like, so the
+// next Read configures it again.
+func (s *Sensor) wait(ctx context.Context) error {
+	err := poll.Until(ctx, s.clk, s.cfg.pollInterval, s.cfg.readyTimeout, s.ready)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, vane.ErrNotReady) {
+		s.reinit = true
+	}
+	return s.fail("wait", regStatus, err)
+}
+
+// Close powers the chip down. It is idempotent, and after it every Read returns
+// vane.ErrClosed. BDU stays on even in power-down, like every other write. The
+// sensor is closed even if the write fails, and the error is returned once.
+//
+// Close waits for a Read in progress, which is bounded by the ready timeout.
+func (s *Sensor) Close(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	if err := s.dev.Write(ctx, regCtrl1, ctrl1BDU); err != nil {
+		return s.fail("close", regCtrl1, err)
+	}
+	return nil
 }
 
 // dataReady reports whether both the pressure and the temperature of the
@@ -144,18 +270,19 @@ func (s *Sensor) dataReady(ctx context.Context) (bool, error) {
 	return st&(statusPDA|statusTDA) == statusPDA|statusTDA, nil
 }
 
-// sample converts the output registers in s.out.
-func (s *Sensor) sample(now time.Time) Sample {
+// sample converts the output registers in s.out. pExtra and tExtra are flags the
+// caller adds to those the conversion sets.
+func (s *Sensor) sample(now time.Time, pExtra, tExtra vane.Flag) Sample {
 	rawP := int24LE(s.out[0], s.out[1], s.out[2])
 	rawT := int16LE(s.out[3], s.out[4])
 
 	p := pressure(rawP)
-	var pFlags vane.Flag
+	pFlags := pExtra
 	if p < pressureMinOperating || p > pressureMaxOperating {
 		pFlags |= vane.FlagOutOfRange
 	}
 	t := temperature(rawT)
-	var tFlags vane.Flag
+	tFlags := tExtra
 	if t > tempMaxOperating {
 		tFlags |= vane.FlagOutOfRange
 	}
