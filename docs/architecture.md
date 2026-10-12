@@ -120,7 +120,8 @@ var (
 type SensorError struct {
 	Source Source
 	Op     string // "identify", "calibrate", "configure", "trigger", "wait", "read", "close"
-	Reg    int    // register involved, -1 when none
+	Reg    uint8  // register involved, meaningful only when HasReg is set
+	HasReg bool   // the zero value means "no register", not register 0x00
 	Err    error
 }
 func (e *SensorError) Error() string
