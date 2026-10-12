@@ -51,5 +51,57 @@ reported in the field.
 | Whether `ONE_SHOT` reads back 1 while a conversion is in progress and 0 once it ends | recovery after a timeout: the driver asks the chip whether a conversion is still pending instead of guessing whether it reset | datasheet (`CTRL_REG2` description); the ST header names the bit but not its read-back |
 | Whether a brown-out leaves `PD` = 0 (so the symptom is `ErrNotReady`) | reset recovery (ADR-0005) | observed only by cutting power to the HAT; otherwise it stays an inference |
 
-The LPS25H and LSM9DS1 facts, and everything about kernel ownership on the Pi,
-are in REQUIREMENTS Appendix A and still await M1.
+## LPS25H / LPS25HB — confirmed from primary sources
+
+Two chips and two sources, so a fact is only as strong as the source that
+carries it. Read on 2026-10-12:
+
+- **Kernel** (the LPS25H) — `raspberrypi/linux` `rpi-6.12.y`,
+  `drivers/iio/pressure/st_pressure_core.c` and
+  `drivers/iio/common/st_sensors/st_sensors_i2c.c`.
+- **ST reference** (the LPS25HB) — `STMicroelectronics/lps25hb-pid`,
+  `lps25hb_reg.h` and `lps25hb_reg.c`.
+
+| Fact | Value | Source |
+| --- | --- | --- |
+| I2C address | 0x5C | `rpi-sense` overlay (REQUIREMENTS Appendix A) |
+| `WHO_AM_I` | register 0x0F = **0xBD, for both chips** | kernel `st_pressure_core.c:356` (LPS25H); ST `lps25hb_reg.h:189, 199` (LPS25HB) |
+| `CTRL_REG1` | register 0x20; `SIM` bit 0, `RESET_AZ` bit 1, `BDU` bit 2, `DIFF_EN` bit 3, `ODR` bits 6:4, `PD` bit 7 | ST `lps25hb_reg.h:214–230`; kernel `st_pressure_core.c:363–375, 392–395` (masks 0x70, 0x80, 0x04) |
+| `ODR` | 0 = one-shot, 1 = 1 Hz, 2 = 7 Hz, 3 = 12.5 Hz, 4 = 25 Hz. ST's own enum folds `PD` in: one-shot is 8, the rates are 9 to 12 | kernel `st_pressure_core.c:366–371`; ST `lps25hb_reg.h:470–477` |
+| `CTRL_REG2` | register 0x21; `ONE_SHOT` bit 0, `AUTOZERO` bit 1, `SWRESET` bit 2, `FIFO_EN` bit 6, `BOOT` bit 7 | ST `lps25hb_reg.h:232–254` |
+| `STATUS_REG` | register 0x27; `T_DA` bit 0, `P_DA` bit 1, `T_OR` bit 4, `P_OR` bit 5. **The overrun bits exist here**, unlike the HTS221 | ST `lps25hb_reg.h:320–338`; kernel `st_pressure_core.c:405–408` (data-ready mask 0x03) |
+| Output | pressure 0x28–0x2A, **24-bit signed**, temperature 0x2B–0x2C, **16-bit signed**, little-endian | ST `lps25hb_reg.h:340–344`; kernel `st_pressure_core.c:124–156` (`sign = 's'`, `realbits` 24 and 16) |
+| Pressure | hPa = count / 4096 | ST `lps25hb_reg.c:101–104` |
+| Temperature | °C = count / 480 + 42.5 | ST `lps25hb_reg.c:106–109`; kernel `st_pressure_core.c:96–97` (480 LSB/°C, offset 42500 m°C) |
+| Sub-address auto-increment | the **MSB** (0x80), for multi-byte reads | kernel `st_pressure_core.c:414` (`multi_read_bit`), `st_sensors_i2c.c:18, 25–28, 45` |
+| Pressure upper limit | 1260 hPa full scale | kernel `st_pressure_core.c:386` (`ST_PRESS_FS_AVL_1260MB`) |
+| Boot time | 2 ms after power-up | kernel `st_pressure_core.c:415` (`bootime`) |
+| `AVGP` / `AVGT` | register `RES_CONF` 0x10; `AVGP` bits 1:0, `AVGT` bits 3:2 — **the codes only, see the conflict below** | ST `lps25hb_reg.h:200–212` |
+
+**The LPS25H and the LPS25HB, from these sources.** They share the identity
+value and every register the driver uses, as the table shows from two
+independent sources. No register read distinguishes them in either source, so
+`Sensor.Variant()` returns "unknown" (ADR-0003). That says nothing about
+differences in registers vane does not use.
+
+**A conflict, not a fact: the averaging sample counts.** ST's header for the
+LPS25HB encodes `AVGP` as 8, 16, 32, 64 samples (`lps25hb_reg.h:440–443`) and
+`AVGT` as 8, 16, 32, 64 (`:452–455`). The LPS25H datasheet table, as remembered
+and not re-read, gives 8, 32, 128, 512 for pressure. One of the two is wrong
+for one of the two chips, and the kernel does not touch `RES_CONF`. Until the
+datasheet settles it, vane leaves `RES_CONF` alone and offers no averaging
+option for the LPS25H.
+
+### Still to confirm for the LPS25H
+
+| Fact | Needed for | Where it can be settled |
+| --- | --- | --- |
+| The averaging sample counts per `AVGP`/`AVGT` code | an averaging option | datasheet, for each of the two chips |
+| Conversion time (default averaging) | the one-shot ready timeout (default 1 s is an over-estimate) | datasheet, then measured on the Pi (#14) |
+| Operating range: pressure 260–1260 hPa, temperature −30…+105 °C | `FlagOutOfRange`; only 1260 is confirmed (full scale) | datasheet; the driver has the rest from memory |
+| Whether `P_OR`/`T_OR` are raised when `BDU` is on and a sample is held back | whether `FlagOverrun` can ever appear, since vane keeps `BDU` on | datasheet, or a long run on the Pi |
+| Whether reading the output registers clears `P_DA`/`T_DA` and the overrun bits | the model's flag handling | datasheet |
+| Whether `ONE_SHOT` reads back 1 while a conversion is pending | recovery after a timeout (as for the HTS221) | datasheet |
+
+The LSM9DS1 facts, and everything about kernel ownership on the Pi, are in
+REQUIREMENTS Appendix A and still await M1.
