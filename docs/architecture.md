@@ -358,12 +358,21 @@ both `*sensehat.Device` and `*FakeBoard` satisfy it, so they cannot drift
 
 ```go
 package regio // register access for ST chips (G-13)
-func Read(ctx context.Context, b vane.Bus, addr uint16, reg uint8) (uint8, error)
-func Write(ctx context.Context, b vane.Bus, addr uint16, reg, val uint8) error
-func ReadBlock(ctx context.Context, b vane.Bus, addr uint16, reg uint8, dst []byte) error // sets 0x80 on reg
+// Dev owns a scratch buffer so reads allocate nothing (RNF-08): a buffer local
+// to a function escapes through the Bus interface (measured, 2 allocs/op).
+// Not safe for concurrent use; the driver's per-chip mutex covers it (ADR-0004).
+type Dev struct{ /* bus, addr, buf [2]byte */ }
+func New(b vane.Bus, addr uint16) *Dev
+func (d *Dev) Read(ctx context.Context, reg uint8) (uint8, error)
+func (d *Dev) Write(ctx context.Context, reg, val uint8) error
+func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error // sets 0x80; the only place that does
 
 package poll // data-ready wait (RNF-05)
-func Until(ctx context.Context, interval, timeout time.Duration, ready func(context.Context) (bool, error)) error
+type Clock interface { Now() time.Time; Sleep(ctx context.Context, d time.Duration) error }
+var Real Clock // wall clock; tests inject one that advances virtual time
+// nil clk means Real. ErrNotReady at the timeout, ctx.Err() on cancellation;
+// ready is called once more at the deadline.
+func Until(ctx context.Context, clk Clock, interval, timeout time.Duration, ready func(context.Context) (bool, error)) error
 
 package kernel // sysfs and device tree, root injectable for tests
 func Owner(root string, bus int, addr uint16) (driver string, owned bool, err error)
@@ -397,7 +406,7 @@ that the first write in the recorded sequence comes after the `WHO_AM_I` read.
 ### 6.3 One-shot `Read`
 
 1. Lock the sensor's mutex — trigger → wait → read is atomic per chip (RNF-04).
-2. `ctx` checked; write `ONE_SHOT`.
+2. `ctx` checked; write `ONE_SHOT` through the sensor's `regio.Dev`.
 3. `poll.Until` on the status register, `ctx` checked each iteration (RNF-05).
    Timeout → `ErrNotReady`; mark the sensor for re-initialisation (G-11).
 4. `ReadBlock` the data registers; sign-extend into `Raw`; convert; clamp and flag (RF-12).
