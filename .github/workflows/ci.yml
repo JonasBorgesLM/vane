@@ -361,9 +361,20 @@ jobs:
       - name: Every commit in this PR follows the convention
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
           pattern="^($TYPES)(\\(($SCOPES)\\))?!?: .+"
           bad=0
+          # A release or hotfix into main carries every commit develop gained
+          # since the last release. Those were already checked on their way
+          # into develop, and are immutable there; rechecking them here can
+          # only fail a release for a subject nobody can change any more. So
+          # into main, only the commits not yet on develop are checked.
+          range="$BASE..HEAD"
+          if [ "$BASE_REF" = "main" ]; then
+            git fetch --no-tags origin develop
+            range="origin/develop..HEAD"
+          fi
           while IFS= read -r sha; do
             # A merge commit's subject is generated, not written.
             [ "$(git rev-list --no-walk --count --merges "$sha")" -eq 1 ] && continue
@@ -377,7 +388,7 @@ jobs:
             case "$subject" in
               *.) echo "::error::subject ends with a period: $subject"; bad=1 ;;
             esac
-          done < <(git rev-list "$BASE"..HEAD)
+          done < <(git rev-list "$range")
 
           if [ "$bad" -ne 0 ]; then
             echo ""
@@ -395,16 +406,21 @@ jobs:
           fi
           echo "all commits follow the convention"
 
+      # The squash subject is the title plus " (#N)", appended by GitHub, so
+      # the limit applies to that: a 67-character title on #56 became a
+      # 73-character subject on develop that no check had seen.
       - name: The PR title follows the convention
         env:
           TITLE: ${{ github.event.pull_request.title }}
+          NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if ! printf '%s' "$TITLE" | grep -qE "^($TYPES)(\\(($SCOPES)\\))?!?: .+"; then
             echo "::error::PR title is not a conventional commit: $TITLE"
             exit 1
           fi
-          if [ ${#TITLE} -gt 72 ]; then
-            echo "::error::PR title over 72 characters (${#TITLE})"
+          squashed="$TITLE (#$NUMBER)"
+          if [ ${#squashed} -gt 72 ]; then
+            echo "::error::PR title too long: the squash subject '$squashed' is ${#squashed} characters, over 72"
             exit 1
           fi
           echo "PR title follows the convention"
