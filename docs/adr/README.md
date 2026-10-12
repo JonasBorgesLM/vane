@@ -20,6 +20,7 @@ named `0000-` so it does not read as a decision or trip the index check.
 | [`0004`](0004-concurrency-model.md) | A per-chip mutex covers trigger → wait → read; no bus-level lock, no goroutines | Accepted | — |
 | [`0005`](0005-one-shot-default.md) | One-shot is the default acquisition mode; BDU is always on | Accepted | — |
 | [`0006`](0006-errors-and-partial-failure.md) | Sentinels plus typed wrappers; failure per sensor, whole-call failure only when nothing worked | Accepted | — |
+| [`0007`](0007-write-allowlist-in-tests.md) | Writes restricted to datasheet-writable registers, enforced by the test models, not at runtime | Accepted | — |
 
 Each row links its file, so the index is navigable and the
 `check-docs.sh` cross-check can verify both directions.
@@ -36,6 +37,7 @@ never.
 | `0004` | Measured `Environment` latency matters to beacon, or a second process uses the HAT in a real deployment |
 | `0005` | One-shot latency on the Pi 5 at default averaging exceeds beacon's sampling interval |
 | `0006` | A consumer needs a failure mode it can only express by parsing messages |
+| `0007` | A third-party driver is accepted, or a recorded transcript shows a write a model rejects |
 
 ## Open questions
 
@@ -48,4 +50,3 @@ Accepted.
 | ADR | Question | Issue | Depends on the Pi |
 | --- | --- | --- | --- |
 | `0001` | Hardware access when kernel drivers own the LPS25H and LSM9DS1 | #18 | yes — blocked by #14, #15, #16 |
-| `0007` | Write allowlist enforced in tests, not at runtime | #9 | no |
