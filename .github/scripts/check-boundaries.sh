@@ -15,7 +15,7 @@
 # not see its imports and check 1 would pass for the wrong reason.
 
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 
 export GOOS=linux GOARCH=arm64 CGO_ENABLED=0
 MOD=$(go list -m)

@@ -248,9 +248,10 @@ jobs:
             printf '\n### API changes (generated)\n\n```\n'
             cat "$diff_file"
             printf '```\n\n'
-            printf 'Verified with `%s`; module floor Go %s (RNF-09).\n\n' "$TOOLCHAIN" "$GO_VERSION"
-            printf 'Every file below has build provenance: '
-            printf '`gh attestation verify <file> --repo %s`.\n' "$GITHUB_REPOSITORY"
+            # The backticks are Markdown, not command substitution.
+            printf "Verified with \`%s\`; module floor Go %s (RNF-09).\n\n" "$TOOLCHAIN" "$GO_VERSION"
+            printf "Every file below has build provenance: "
+            printf "\`gh attestation verify <file> --repo %s\`.\n" "$GITHUB_REPOSITORY"
           } > "$notes"
           cat "$notes"
 
@@ -278,4 +279,4 @@ jobs:
           mod=$(go list -m)
           cd "$(mktemp -d)"
           go mod init probe.local >/dev/null 2>&1
-          GOPROXY=https://proxy.golang.org GOFLAGS= go list -m "${mod}@${TAG}"
+          GOPROXY=https://proxy.golang.org GOFLAGS='' go list -m "${mod}@${TAG}"
