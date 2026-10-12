@@ -24,8 +24,14 @@ type Clock interface {
 	Sleep(ctx context.Context, d time.Duration) error
 }
 
-// Real is the Clock backed by the wall clock.
+// Real is the Clock backed by the wall clock. Each Sleep makes a timer; a
+// driver that waits on every read uses Reusable instead.
 var Real Clock = realClock{}
+
+// Reusable returns a Clock on the wall clock whose Sleep reuses one timer, so
+// waiting allocates nothing (RNF-08). It is not safe for concurrent use: the
+// caller serialises it, as a driver does with its per-chip mutex.
+func Reusable() Clock { return &reusableClock{} }
 
 type realClock struct{}
 
@@ -40,6 +46,28 @@ func (realClock) Sleep(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type reusableClock struct{ t *time.Timer }
+
+// Now returns the wall-clock time.
+func (*reusableClock) Now() time.Time { return time.Now() }
+
+// Sleep waits d, or until ctx ends. Since Go 1.23 a stopped or reset timer has
+// no stale value to drain, which is what lets one timer serve every call.
+func (c *reusableClock) Sleep(ctx context.Context, d time.Duration) error {
+	if c.t == nil {
+		c.t = time.NewTimer(d)
+	} else {
+		c.t.Reset(d)
+	}
+	select {
+	case <-c.t.C:
+		return nil
+	case <-ctx.Done():
+		c.t.Stop()
 		return ctx.Err()
 	}
 }

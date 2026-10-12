@@ -194,3 +194,66 @@ func TestRealSleepWakesOnCancelAndLeaksNothing(t *testing.T) {
 	}
 	t.Fatalf("goroutines: %d before, %d after", before, after)
 }
+
+func TestReusableClockSleepsAndIsReusedAcrossCalls(t *testing.T) {
+	clk := poll.Reusable()
+	for range 3 {
+		start := time.Now()
+		if err := clk.Sleep(context.Background(), 15*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		if d := time.Since(start); d < 15*time.Millisecond {
+			t.Fatalf("slept %v, want at least 15ms", d)
+		}
+	}
+}
+
+// After a sleep is cut short the same timer serves the next one. A timer that
+// kept a stale firing would end the next sleep at once; this one must not.
+func TestReusableClockAfterACancelledSleepStillWaitsTheFullTime(t *testing.T) {
+	clk := poll.Reusable()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := clk.Sleep(ctx, time.Hour); !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 5*time.Second {
+		t.Fatalf("error = %v after %v, want the deadline to cut the hour-long sleep", err, time.Since(start))
+	}
+	start = time.Now()
+	if err := clk.Sleep(context.Background(), 30*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d < 30*time.Millisecond {
+		t.Fatalf("the sleep after a cancelled one lasted %v, want at least 30ms", d)
+	}
+}
+
+func TestReusableClockDoesNotAllocate(t *testing.T) {
+	clk := poll.Reusable()
+	_ = clk.Sleep(context.Background(), time.Microsecond) // the first call makes the timer
+	if n := testing.AllocsPerRun(100, func() { _ = clk.Sleep(context.Background(), time.Microsecond) }); n != 0 {
+		t.Fatalf("Sleep allocates %v times per call, want 0", n)
+	}
+	if n := testing.AllocsPerRun(100, func() { _ = poll.Real.Sleep(context.Background(), time.Microsecond) }); n == 0 {
+		t.Log("the plain clock no longer allocates either; Reusable may be unnecessary")
+	}
+}
+
+func TestReusableClockWakesOnCancelAndLeaksNothing(t *testing.T) {
+	before := runtime.NumGoroutine()
+	clk := poll.Reusable()
+	for range 20 {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Millisecond)
+		err := poll.Until(ctx, clk, time.Hour, 2*time.Hour, func(context.Context) (bool, error) { return false, nil })
+		cancel()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err = %v", err)
+		}
+	}
+	for range 50 {
+		if runtime.NumGoroutine() <= before {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("goroutines: %d before, %d after", before, runtime.NumGoroutine())
+}
