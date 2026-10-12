@@ -90,6 +90,24 @@ Closes #26
 - One subject per commit. Stage files explicitly; do not `git add -A` a tree
   holding two subjects.
 
+### Signed commits
+
+The `main` and `develop` rulesets require **verified** signatures on every
+commit in a pull request — the squash or merge commit GitHub creates is signed
+by GitHub, but the PR's own commits must be signed too, or the merge stays
+blocked with every check green (`usher` and `bastion` never required this, so
+it was first hit here, on #56). Sign with the SSH key already used for tags,
+registered on GitHub as a **signing** key:
+
+```bash
+git config --local commit.gpgsign true   # gpg.format=ssh and user.signingkey are global
+git log --show-signature -1              # or: the "Verified" badge on GitHub
+```
+
+A commit made before this was set is re-signed with `git commit --amend -S
+--no-edit` (or `git rebase --exec 'git commit --amend -S --no-edit' develop`)
+and force-pushed to the work branch — never to `develop` or `main`.
+
 ## Before pushing
 
 ```bash
