@@ -8,7 +8,7 @@ import (
 	"github.com/JonasBorgesLM/vane/vanetest"
 )
 
-var ctx = context.Background()
+var bg = context.Background()
 
 // rig is a driver's test bench: a model on a fake bus, and a reporter that
 // fails the test if the driver breaks a protocol rule.

@@ -12,7 +12,7 @@ import (
 
 func TestNewIdentifiesThenConfigures(t *testing.T) {
 	r := newRig(t)
-	s, err := hts221.New(ctx, r.bus, hts221.WithBusName("/dev/i2c-1"))
+	s, err := hts221.New(bg, r.bus, hts221.WithBusName("/dev/i2c-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestNewIdentifiesThenConfigures(t *testing.T) {
 // makes this test and the one below fail.
 func TestTheIdentityRegisterIsReadBeforeAnythingIsWritten(t *testing.T) {
 	r := newRig(t)
-	if _, err := hts221.New(ctx, r.bus); err != nil {
+	if _, err := hts221.New(bg, r.bus); err != nil {
 		t.Fatal(err)
 	}
 	log := r.bus.Log()
@@ -49,7 +49,7 @@ func TestAWrongChipIsRefusedAndNothingIsWritten(t *testing.T) {
 	for name, id := range map[string]uint8{"an LPS25H": 0xBD, "all ones": 0xFF, "zero": 0x00} {
 		t.Run(name, func(t *testing.T) {
 			r := newRig(t, vanetest.WithWhoAmI(id))
-			s, err := hts221.New(ctx, r.bus, hts221.WithBusName("/dev/i2c-1"))
+			s, err := hts221.New(bg, r.bus, hts221.WithBusName("/dev/i2c-1"))
 			if s != nil {
 				t.Fatal("New returned a sensor for the wrong chip")
 			}
@@ -95,7 +95,7 @@ func TestIdentificationFailsCleanly(t *testing.T) {
 			if tc.fault != nil {
 				r.bus.Inject(0x5F, *tc.fault)
 			}
-			_, err := hts221.New(ctx, bus)
+			_, err := hts221.New(bg, bus)
 			var se *vane.SensorError
 			if !errors.As(err, &se) || se.Op != tc.wantOp || !se.HasReg || se.Reg != 0x0F {
 				t.Fatalf("error = %v, want a SensorError for op %q at register 0x0f", err, tc.wantOp)
@@ -114,7 +114,7 @@ func ptr[T any](v T) *T { return &v }
 
 func TestACancelledContextTouchesNothing(t *testing.T) {
 	r := newRig(t)
-	cctx, cancel := context.WithCancel(ctx)
+	cctx, cancel := context.WithCancel(bg)
 	cancel()
 	if _, err := hts221.New(cctx, r.bus); !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v", err)
@@ -126,19 +126,19 @@ func TestACancelledContextTouchesNothing(t *testing.T) {
 
 func TestAddressOption(t *testing.T) {
 	r := newRig(t)
-	if _, err := hts221.New(ctx, r.bus, hts221.WithAddress(0x5C)); !errors.Is(err, vane.ErrNotPresent) {
+	if _, err := hts221.New(bg, r.bus, hts221.WithAddress(0x5C)); !errors.Is(err, vane.ErrNotPresent) {
 		t.Errorf("a sensor at 0x5c on a bus with a model at 0x5f: error = %v", err)
 	}
 	for _, bad := range []uint16{0x80, 0x100, 0xFFFF} {
 		r := newRig(t)
-		if _, err := hts221.New(ctx, r.bus, hts221.WithAddress(bad)); err == nil {
+		if _, err := hts221.New(bg, r.bus, hts221.WithAddress(bad)); err == nil {
 			t.Errorf("address %#x accepted", bad)
 		}
 		if n := len(r.bus.Log()); n != 0 {
 			t.Errorf("address %#x: %d transactions before the option was refused", bad, n)
 		}
 	}
-	if _, err := hts221.New(ctx, newRig(t).bus, hts221.WithClock(nil)); err == nil {
+	if _, err := hts221.New(bg, newRig(t).bus, hts221.WithClock(nil)); err == nil {
 		t.Error("a nil clock was accepted")
 	}
 }

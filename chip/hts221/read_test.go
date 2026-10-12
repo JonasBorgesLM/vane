@@ -23,7 +23,7 @@ func newSensor(t *testing.T, r *rig, opts ...hts221.Option) *hts221.Sensor {
 		hts221.WithClock(fixedClock),
 		hts221.WithPollInterval(time.Millisecond),
 	}, opts...)
-	s, err := hts221.New(ctx, r.bus, opts...)
+	s, err := hts221.New(bg, r.bus, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestReadReturnsTheValuesTheChipMeasures(t *testing.T) {
 	r := newRig(t)
 	s := newSensor(t, r)
 	r.model.Set(50, 50) // the model puts these at 3500 and 1000 counts
-	got, err := s.Read(ctx)
+	got, err := s.Read(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestReadTracksWhatIsSet(t *testing.T) {
 	s := newSensor(t, r)
 	for _, tc := range []struct{ rh, t float64 }{{20, 20}, {80, 80}, {33.3, -12.5}, {0.5, 99.9}, {99.5, 0}, {61.234, 37.8}} {
 		r.model.Set(vanetest.HTS221Humidity(tc.rh), vanetest.HTS221Temperature(tc.t))
-		got, err := s.Read(ctx)
+		got, err := s.Read(bg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,9 +76,9 @@ func TestEveryReadIsAFreshSample(t *testing.T) {
 	r := newRig(t)
 	s := newSensor(t, r)
 	r.model.Set(30, 30)
-	first, _ := s.Read(ctx)
+	first, _ := s.Read(bg)
 	r.model.Set(70, 70)
-	second, err := s.Read(ctx)
+	second, err := s.Read(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestFlagsDescribeReadingsOutsideTheRange(t *testing.T) {
 			r := newRig(t)
 			s := newSensor(t, r)
 			r.model.Set(vanetest.HTS221Humidity(tc.rh), vanetest.HTS221Temperature(tc.t))
-			got, err := s.Read(ctx)
+			got, err := s.Read(bg)
 			if err != nil {
 				t.Fatalf("a flagged reading must not be an error: %v", err)
 			}
@@ -128,7 +128,7 @@ func TestReadWaitsForTheConversion(t *testing.T) {
 	s := newSensor(t, r)
 	r.model.Set(50, 50)
 	before := len(r.bus.Log())
-	if _, err := s.Read(ctx); err != nil {
+	if _, err := s.Read(bg); err != nil {
 		t.Fatal(err)
 	}
 	var statusReads int
@@ -147,7 +147,7 @@ func TestReadGivesUpWhenTheChipNeverFinishes(t *testing.T) {
 	s := newSensor(t, r, hts221.WithReadyTimeout(30*time.Millisecond))
 	r.bus.Inject(0x5F, vanetest.StallReady())
 	start := time.Now()
-	_, err := s.Read(ctx)
+	_, err := s.Read(bg)
 	var se *vane.SensorError
 	if !errors.Is(err, vane.ErrNotReady) || !errors.As(err, &se) || se.Op != "wait" || se.Reg != 0x27 {
 		t.Fatalf("error = %v, want a wait SensorError at register 0x27 wrapping ErrNotReady", err)
@@ -161,7 +161,7 @@ func TestReadStopsWhenTheContextEnds(t *testing.T) {
 	r := newRig(t)
 	s := newSensor(t, r, hts221.WithReadyTimeout(time.Hour))
 	r.bus.Inject(0x5F, vanetest.StallReady())
-	cctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	cctx, cancel := context.WithTimeout(bg, 20*time.Millisecond)
 	defer cancel()
 	start := time.Now()
 	_, err := s.Read(cctx)
@@ -189,7 +189,7 @@ func TestEachStepReportsItsOwnFailure(t *testing.T) {
 			r := newRig(t)
 			s := newSensor(t, r)
 			r.bus.Inject(0x5F, vanetest.EIO().After(tc.after).Times(1))
-			_, err := s.Read(ctx)
+			_, err := s.Read(bg)
 			var se *vane.SensorError
 			if !errors.As(err, &se) || se.Op != tc.wantOp || se.Reg != tc.wantReg || !errors.Is(err, vanetest.ErrIO) {
 				t.Fatalf("error = %v, want a %s SensorError at 0x%02x wrapping ErrIO", err, tc.wantOp, tc.wantReg)
@@ -208,7 +208,7 @@ func newDirect(tb testing.TB, polls int) *hts221.Sensor {
 	tb.Helper()
 	m := vanetest.NewHTS221(vanetest.WithConversionPolls(polls))
 	m.Set(50, 50)
-	s, err := hts221.New(ctx, directBus{m}, hts221.WithClock(fixedClock), hts221.WithPollInterval(time.Microsecond))
+	s, err := hts221.New(bg, directBus{m}, hts221.WithClock(fixedClock), hts221.WithPollInterval(time.Microsecond))
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func newDirect(tb testing.TB, polls int) *hts221.Sensor {
 func TestReadDoesNotAllocate(t *testing.T) {
 	for name, polls := range map[string]int{"data ready at once": 0, "after one wait": 1} {
 		s := newDirect(t, polls)
-		if n := testing.AllocsPerRun(200, func() { _, _ = s.Read(ctx) }); n != 0 {
+		if n := testing.AllocsPerRun(200, func() { _, _ = s.Read(bg) }); n != 0 {
 			t.Errorf("%s: Read allocates %v times per call, want 0", name, n)
 		}
 	}
@@ -231,7 +231,7 @@ func BenchmarkRead(b *testing.B) {
 	s := newDirect(b, 0)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := s.Read(ctx); err != nil {
+		if _, err := s.Read(bg); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -241,7 +241,7 @@ func BenchmarkReadThatWaits(b *testing.B) {
 	s := newDirect(b, 1)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := s.Read(ctx); err != nil {
+		if _, err := s.Read(bg); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -252,7 +252,7 @@ func TestRawIsSignExtended(t *testing.T) {
 	r := newRig(t)
 	s := newSensor(t, r)
 	r.model.Set(0, 0) // 20 %RH below H0 (-500 - 2667) and 20 degC below T0 (-200 - 800)
-	got, err := s.Read(ctx)
+	got, err := s.Read(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestReadWaitsForBothDataReadyBits(t *testing.T) {
 	r := newRig(t, vanetest.WithStaggeredReady())
 	s := newSensor(t, r)
 	r.model.Set(50, 50)
-	got, err := s.Read(ctx)
+	got, err := s.Read(bg)
 	if err != nil {
 		t.Fatal(err)
 	}

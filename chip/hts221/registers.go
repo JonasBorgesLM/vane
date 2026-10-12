@@ -23,9 +23,4 @@ const (
 	ctrl2OneShot = 1 << 0
 	statusTDA    = 1 << 0
 	statusHDA    = 1 << 1
-
-	// avConfDefault is the chip's own default (32 humidity samples, 16
-	// temperature samples). It is written rather than assumed, so the state
-	// does not depend on what a previous user of the bus left behind.
-	avConfDefault = 0x1B
 )

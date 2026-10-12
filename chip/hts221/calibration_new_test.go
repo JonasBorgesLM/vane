@@ -11,7 +11,7 @@ import (
 
 func TestNewReadsTheFactoryCalibrationFromTheChip(t *testing.T) {
 	r := newRig(t)
-	s, err := hts221.New(ctx, r.bus)
+	s, err := hts221.New(bg, r.bus)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestNewReadsTheFactoryCalibrationFromTheChip(t *testing.T) {
 
 func TestTheCalibrationIsOneBlockReadWithAutoIncrement(t *testing.T) {
 	r := newRig(t)
-	if _, err := hts221.New(ctx, r.bus); err != nil {
+	if _, err := hts221.New(bg, r.bus); err != nil {
 		t.Fatal(err)
 	}
 	log := r.bus.Log()
@@ -57,7 +57,7 @@ func TestADegenerateCalibrationIsRefusedBeforeAnythingIsWritten(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r := newRig(t)
 			poke(r.model)
-			s, err := hts221.New(ctx, r.bus)
+			s, err := hts221.New(bg, r.bus)
 			if s != nil {
 				t.Fatal("New returned a sensor with an unusable calibration")
 			}
@@ -84,7 +84,7 @@ func TestACalibrationReadThatFailsIsReportedAsSuch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r := newRig(t)
 			r.bus.Inject(0x5F, tc.fault) // After(1): the identity read passes
-			_, err := hts221.New(ctx, r.bus)
+			_, err := hts221.New(bg, r.bus)
 			var se *vane.SensorError
 			if !errors.As(err, &se) || se.Op != "calibrate" || !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want a calibrate SensorError wrapping %v", err, tc.want)
