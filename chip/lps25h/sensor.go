@@ -2,10 +2,20 @@ package lps25h
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/JonasBorgesLM/vane"
+	"github.com/JonasBorgesLM/vane/internal/poll"
 	"github.com/JonasBorgesLM/vane/internal/regio"
 )
+
+// Sample is one reading of both quantities. They come from one conversion and
+// share a Time.
+type Sample struct {
+	Pressure    vane.Measurement[vane.Hectopascal]
+	Temperature vane.Measurement[vane.Celsius]
+}
 
 // Variant says which chip of the family a Sensor is driving.
 type Variant uint8
@@ -19,11 +29,17 @@ type Variant uint8
 // callers; until then there is nothing true to return.
 const VariantUnknown Variant = iota
 
-// Sensor is an LPS25H or LPS25HB on a bus.
+// Sensor is an LPS25H or LPS25HB on a bus. It is safe for concurrent use: the
+// mutex makes trigger, wait and read one sequence per chip (ADR-0004).
 type Sensor struct {
 	dev *regio.Dev
 	src vane.Source
 	cfg config
+
+	mu    sync.Mutex
+	out   [5]byte    // scratch for the output registers; guarded by mu
+	clk   poll.Clock // one timer, reused by every wait; guarded by mu
+	ready func(context.Context) (bool, error)
 }
 
 // New identifies the chip, then configures it. The order is the requirement:
@@ -46,6 +62,9 @@ func New(ctx context.Context, bus vane.Bus, opts ...Option) (*Sensor, error) {
 		src: vane.Source{Chip: vane.ChipLPS25H, Bus: cfg.bus, Address: cfg.addr},
 		cfg: cfg,
 	}
+	// Built once: a method value made per call would allocate on every Read.
+	s.ready = s.dataReady
+	s.clk = poll.Reusable()
 	if err := s.identify(ctx); err != nil {
 		return nil, err
 	}
@@ -90,4 +109,58 @@ func (s *Sensor) configure(ctx context.Context) error {
 
 func (s *Sensor) fail(op string, reg uint8, err error) error {
 	return &vane.SensorError{Source: s.src, Op: op, Reg: reg, HasReg: true, Err: err}
+}
+
+// Read triggers one conversion, waits for it, and returns the result. The
+// sample is always new, and the chip idles between reads.
+//
+// Read stops waiting when ctx ends, but a transaction already on the bus cannot
+// be interrupted, so cancellation takes effect after at most one transaction
+// and one poll interval (RNF-05).
+func (s *Sensor) Read(ctx context.Context) (Sample, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.dev.Write(ctx, regCtrl2, ctrl2OneShot); err != nil {
+		return Sample{}, s.fail("trigger", regCtrl2, err)
+	}
+	if err := poll.Until(ctx, s.clk, s.cfg.pollInterval, s.cfg.readyTimeout, s.ready); err != nil {
+		return Sample{}, s.fail("wait", regStatus, err)
+	}
+	now := s.cfg.now()
+	if err := s.dev.ReadBlock(ctx, regOut, s.out[:]); err != nil {
+		return Sample{}, s.fail("read", regOut, err)
+	}
+	return s.sample(now), nil
+}
+
+// dataReady reports whether both the pressure and the temperature of the
+// conversion are ready.
+func (s *Sensor) dataReady(ctx context.Context) (bool, error) {
+	st, err := s.dev.Read(ctx, regStatus)
+	if err != nil {
+		return false, err
+	}
+	return st&(statusPDA|statusTDA) == statusPDA|statusTDA, nil
+}
+
+// sample converts the output registers in s.out.
+func (s *Sensor) sample(now time.Time) Sample {
+	rawP := int24LE(s.out[0], s.out[1], s.out[2])
+	rawT := int16LE(s.out[3], s.out[4])
+
+	p := pressure(rawP)
+	var pFlags vane.Flag
+	if p < pressureMinOperating || p > pressureMaxOperating {
+		pFlags |= vane.FlagOutOfRange
+	}
+	t := temperature(rawT)
+	var tFlags vane.Flag
+	if t > tempMaxOperating {
+		tFlags |= vane.FlagOutOfRange
+	}
+	return Sample{
+		Pressure:    vane.Measurement[vane.Hectopascal]{Value: vane.Hectopascal(p), Raw: rawP, Source: s.src, Time: now, Flags: pFlags},
+		Temperature: vane.Measurement[vane.Celsius]{Value: vane.Celsius(t), Raw: int32(rawT), Source: s.src, Time: now, Flags: tFlags},
+	}
 }
