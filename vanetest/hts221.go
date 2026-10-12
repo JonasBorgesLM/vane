@@ -72,6 +72,7 @@ type HTS221Model struct {
 	// sample was latched, one bit each from HUMIDITY_OUT_L up.
 	readOut    uint8
 	converting bool // a one-shot conversion is under way
+	humPending bool // staggered: the humidity half of a conversion is still to finish
 	pending    int  // status reads still to answer "not ready"
 	stalled    bool
 }
@@ -133,7 +134,7 @@ func (m *HTS221Model) powerOn() {
 		m.regs.Set(reg, 0)
 	}
 	m.regs.Set(hRegAvConf, hAvConfDefault)
-	m.converting, m.pending, m.readOut = false, 0, 0
+	m.converting, m.humPending, m.pending, m.readOut = false, false, 0, 0
 }
 
 func (m *HTS221Model) loadFactoryData() {
@@ -206,7 +207,14 @@ func (m *HTS221Model) checkWrite(w []byte) error {
 // beforeRead lets a conversion complete when the status register is read, after
 // as many "not ready" answers as the model was asked for.
 func (m *HTS221Model) beforeRead(reg, n int) {
-	if reg > hRegStatus || reg+n <= hRegStatus || !m.converting {
+	if reg > hRegStatus || reg+n <= hRegStatus {
+		return
+	}
+	if m.humPending && !m.stalled {
+		m.latchHumidity()
+		m.humPending = false
+	}
+	if !m.converting {
 		return
 	}
 	if m.pending > 0 {
@@ -288,10 +296,22 @@ func (m *HTS221Model) complete() {
 		return
 	}
 	f := hts221Factory
-	setLE16(m.regs, hRegHumL, interpolate(float64(m.rh), f.H0RH, f.H1RH, f.H0T0Out, f.H1T0Out))
 	setLE16(m.regs, hRegTempL, interpolate(float64(m.t), f.T0DegC, f.T1DegC, f.T0Out, f.T1Out))
-	m.regs.Set(hRegStatus, status|hStatusHDA|hStatusTDA)
 	m.readOut = 0
+	if m.opts.staggered {
+		m.regs.Set(hRegStatus, status|hStatusTDA)
+		m.humPending = true
+		return
+	}
+	m.regs.Set(hRegStatus, status|hStatusTDA)
+	m.latchHumidity()
+}
+
+// latchHumidity loads the humidity output and raises its data-ready bit.
+func (m *HTS221Model) latchHumidity() {
+	f := hts221Factory
+	setLE16(m.regs, hRegHumL, interpolate(float64(m.rh), f.H0RH, f.H1RH, f.H0T0Out, f.H1T0Out))
+	m.regs.Set(hRegStatus, m.regs.Get(hRegStatus)|hStatusHDA)
 }
 
 // interpolate is the inverse of the chip's conversion: the raw count at which a

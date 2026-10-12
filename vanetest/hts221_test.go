@@ -374,3 +374,19 @@ func TestHTS221ReportsOverlappingOneShotSequences(t *testing.T) {
 		}
 	})
 }
+
+func TestHTS221StaggeredReadyRaisesTemperatureFirst(t *testing.T) {
+	h := newHTS(t, vanetest.WithStaggeredReady())
+	h.m.Set(50, 50)
+	_ = h.write(0x20, pd|bdu)
+	_ = h.write(0x21, oneShot)
+	if s := h.status(); s != tDA {
+		t.Fatalf("first status = %#x, want only T_DA", s)
+	}
+	if s := h.status(); s != hDA|tDA {
+		t.Fatalf("second status = %#x, want both", s)
+	}
+	if hum, temp := h.outputs(); hum != 3500 || temp != 1000 {
+		t.Errorf("outputs = %d, %d", hum, temp)
+	}
+}

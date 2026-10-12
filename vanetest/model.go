@@ -4,9 +4,10 @@ package vanetest
 type ModelOption func(*modelOptions)
 
 type modelOptions struct {
-	rep    Reporter
-	polls  int
-	whoAmI *uint8
+	rep       Reporter
+	polls     int
+	whoAmI    *uint8
+	staggered bool
 }
 
 // WithReporter sets where the model reports a protocol violation besides
@@ -29,3 +30,9 @@ func newModelOptions(opts []ModelOption) modelOptions {
 	}
 	return o
 }
+
+// WithStaggeredReady makes a conversion finish in two steps: the temperature is
+// ready first and the humidity one read of the status register later. A driver
+// that treats either data-ready bit as "the sample is ready" reads a humidity
+// that is not there yet.
+func WithStaggeredReady() ModelOption { return func(o *modelOptions) { o.staggered = true } }
