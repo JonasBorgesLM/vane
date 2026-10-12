@@ -86,14 +86,15 @@ func TestTemperatureVectors(t *testing.T) {
 // y = (y0 (x1 - x) + y1 (x - x0)) / (x1 - x0). It agrees with interpolate to
 // rounding for any usable calibration and any count.
 func TestInterpolationAgreesWithTheLagrangeForm(t *testing.T) {
-	rng := rand.New(rand.NewSource(1))
+	rng := rand.New(rand.NewSource(1)) // #nosec G404 -- a fixed seed, so the cases are reproducible
 	for range 2000 {
+		// #nosec G115 -- each value is drawn from 0 to 65535 and shifted into the int16 range
 		x0, x1 := int16(rng.Intn(65536)-32768), int16(rng.Intn(65536)-32768)
 		if x0 == x1 {
 			continue
 		}
 		y0, y1 := rng.Float64()*200-50, rng.Float64()*200-50
-		x := int16(rng.Intn(65536) - 32768)
+		x := int16(rng.Intn(65536) - 32768) // #nosec G115 -- as above
 		got := interpolate(x, x0, x1, y0, y1)
 		want := (y0*float64(int(x1)-int(x)) + y1*float64(int(x)-int(x0))) / float64(int(x1)-int(x0))
 		if math.Abs(got-want) > 1e-9*(1+math.Abs(want)) {

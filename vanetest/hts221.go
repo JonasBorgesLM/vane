@@ -157,7 +157,7 @@ func (m *HTS221Model) loadFactoryData() {
 
 // setLE16 stores v as the chip does: two's complement, low byte first.
 func setLE16(r *Regs, reg uint8, v int16) {
-	u := uint16(v) //nolint:gosec // G115: reinterpreting two's complement is the point
+	u := uint16(v) // #nosec G115 -- reinterpreting two's complement is the point
 	r.Set(reg, low8(u))
 	r.Set(reg+1, low8(u>>8))
 }

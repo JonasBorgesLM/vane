@@ -44,7 +44,7 @@ func parseCalibration(b []byte) Calibration {
 
 // int16LE reads a signed 16-bit little-endian value, the chip's output format.
 func int16LE(lo, hi byte) int16 {
-	return int16(uint16(hi)<<8 | uint16(lo)) //nolint:gosec // G115: reinterpreting two's complement is the point
+	return int16(uint16(hi)<<8 | uint16(lo)) // #nosec G115 -- reinterpreting two's complement is the point
 }
 
 // Validate reports whether the calibration can be used to convert a reading.

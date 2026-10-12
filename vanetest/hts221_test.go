@@ -51,6 +51,7 @@ func (h *hts) status() byte { return h.read(0x27, 1)[0] }
 // signed little-endian words.
 func (h *hts) outputs() (hum, temp int16) {
 	b := h.read(0x28, 4)
+	// #nosec G115 -- the chip's outputs are two's complement; reinterpreting them is the point
 	return int16(uint16(b[0]) | uint16(b[1])<<8), int16(uint16(b[2]) | uint16(b[3])<<8)
 }
 

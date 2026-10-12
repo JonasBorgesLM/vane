@@ -20,8 +20,8 @@ func block(h0, h1, t0lo, t1lo, msb byte, h0out, h1out, t0out, t1out int16) []byt
 	b[0x32-calibrationStart], b[0x33-calibrationStart] = t0lo, t1lo
 	b[0x35-calibrationStart] = msb
 	put := func(reg int, v int16) {
-		b[reg-calibrationStart] = byte(uint16(v))
-		b[reg+1-calibrationStart] = byte(uint16(v) >> 8)
+		b[reg-calibrationStart] = byte(uint16(v))        // #nosec G115 -- little-endian two's complement, low byte
+		b[reg+1-calibrationStart] = byte(uint16(v) >> 8) // #nosec G115 -- and the high byte
 	}
 	put(0x36, h0out)
 	put(0x3A, h1out)

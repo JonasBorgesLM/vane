@@ -138,7 +138,7 @@ func (a Averaging) avConf() uint8 {
 	if t == 0 {
 		t = defaultTemperatureAvg
 	}
-	return uint8(bits.TrailingZeros16(h)-2) | uint8(bits.TrailingZeros16(t)-1)<<3 //nolint:gosec // G115: validated powers of two, so both fields are 0 to 7
+	return uint8(bits.TrailingZeros16(h)-2) | uint8(bits.TrailingZeros16(t)-1)<<3 // #nosec G115 -- validated powers of two, so both fields are 0 to 7
 }
 
 // WithAveraging sets the internal averaging. The default is the chip's own, 32
