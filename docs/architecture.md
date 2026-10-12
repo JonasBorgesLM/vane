@@ -318,30 +318,65 @@ does write-then-read with a repeated start in one call.
 ```go
 package vanetest
 
-type FakeBus struct{ /* devices map[uint16]Device, faults, mu */ }
+// FakeBus routes by address, serialises transactions as a real bus does, logs
+// every one, and injects faults. Safe for concurrent use.
 func NewFakeBus(devices ...Device) *FakeBus
 func (b *FakeBus) Tx(ctx context.Context, addr uint16, w, r []byte) error
 func (b *FakeBus) Inject(addr uint16, f Fault)
-func (b *FakeBus) Writes(addr uint16) [][]byte // for assertions: every write, in order
+func (b *FakeBus) Clear(addr uint16)        // drops faults, releases a stalled data-ready
+func (b *FakeBus) Log() []Tx                // deep copies; Tx{Addr, W, R, Err}
+func (b *FakeBus) Writes(addr uint16) [][]byte // for "nothing written before WHO_AM_I"
 
 type Device interface {
 	Addr() uint16
 	Tx(w, r []byte) error
 }
 
-type Fault struct{ /* kind: NACK, ShortRead, EIO, Latency(d), StuckNotReady, Reset; after N tx */ }
+// Faults. After(n) lets n transactions through first; Times(n) bounds how many
+// are affected (0 = until Clear). StallReady and Reset are events: Times(1).
+func NACK() Fault                    // vane.ErrNotPresent; the device never sees it
+func EIO() Fault                     // ErrIO; the device never sees it
+func ShortRead() Fault               // device runs, ErrShortRead, tail of r zeroed
+func Latency(d time.Duration) Fault  // holds the bus; the context can cut it
+func StallReady() Fault              // calls ReadyStaller.StallReady(true) once
+func Reset() Fault                   // calls Resetter.Reset() once, no bus error
 
-// Models are written from the datasheet; they import nothing from chip/*.
-// Every model rejects: a write to a register outside its writable set
-// (ADR-0007), a multi-byte read without the auto-increment bit (G-13), and an
-// interleaved trigger → read sequence (RNF-04).
+type Resetter interface{ Reset() }
+type ReadyStaller interface{ StallReady(stalled bool) }
+
+// Regs is the register file the chip models are built on. It enforces the
+// datasheet rules a real chip punishes silently, and reports each violation to
+// the test (Reporter, satisfied by *testing.T) as well as returning
+// ErrProtocol, so a driver that swallows the error still fails:
+//   - a write to a register outside the writable set (ADR-0007);
+//   - a multi-byte read or write without the auto-increment bit (G-13);
+//   - an access past the last register.
+func NewRegs(rep Reporter, addr uint16, writable ...uint8) *Regs
+func (r *Regs) Get(reg uint8) uint8
+func (r *Regs) Set(reg, val uint8)
+func (r *Regs) Tx(w, rd []byte) error
+
+// Chip models (#25, #31) embed Regs, are written from the datasheet and import
+// nothing from chip/*. The rule that a trigger → wait → read sequence is not
+// interleaved with another is the model's, not the bus's: only the model knows
+// what a sequence is.
 func NewHTS221(opts ...ModelOption) *HTS221Model
 func (m *HTS221Model) Set(rh vane.RelativeHumidity, t vane.Celsius)
 func NewLPS25H(opts ...ModelOption) *LPS25HModel
 func (m *LPS25HModel) Set(p vane.Hectopascal, t vane.Celsius)
 
-func NewRecorder(inner vane.Bus, w io.Writer) *Recorder // also a vane.Bus
-func NewReplayBus(t testing.TB, transcript io.Reader) *ReplayBus
+// Recorder wraps a bus and writes the transcript; a transaction cut short by
+// the context is not recorded. Comment adds the '#' metadata lines.
+func NewRecorder(inner vane.Bus, w io.Writer) *Recorder
+func (r *Recorder) Comment(format string, args ...any)
+func (r *Recorder) Err() error
+
+// ReplayBus requires each transaction to match the next recorded one (address,
+// bytes written, length read). The first divergence is a *DivergenceError,
+// reported to the test and sticky; a transcript not fully replayed is reported
+// when the test ends.
+func NewReplayBus(t T, transcript io.Reader) *ReplayBus // T: Helper, Errorf, Cleanup
+func (b *ReplayBus) Remaining() int
 
 type FakeBoard struct{ /* script, step, closed */ }
 func NewFakeBoard(script ...Step) *FakeBoard
@@ -454,10 +489,12 @@ alternative, so the reason is kept.
 5f W 0f R bc                 # HTS221 WHO_AM_I
 5f W b0 R 3a 4c ...          # calibration block, 0x30 | 0x80 auto-increment
 5f W 20 85                   # write-only: CTRL_REG1 = PD | BDU | 1 Hz
-5c W 0f E nack               # error lines: E <nack|eio|short>
+5c W 0f E nack               # error lines: E <nack|eio|short|error>
 ```
 
 One transaction per line: address, `W` and the written bytes, then `R` and the
-read bytes or `E` and an error. `#` starts a comment. `ReplayBus` requires the
+read bytes or `E` and an error kind (`nack`, `eio`, `short`, or `error` for any
+other). The `# vane transcript v1` header is required, so another kind of file is
+refused rather than replayed as nonsense. `#` starts a comment. `ReplayBus` requires the
 address and written bytes to match exactly and the read length to match; any
 divergence fails the test with both lines printed.
