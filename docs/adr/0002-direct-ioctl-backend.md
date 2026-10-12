@@ -1,7 +1,6 @@
 # ADR-0002: The I2C backend is a direct `I2C_RDWR` ioctl through `golang.org/x/sys`, not periph.io
 
 ## Status
-Accepted — 2026-10-12
 
 ## Context
 vane needs one way to perform I2C transactions on `/dev/i2c-N` on a Pi 5. Two
