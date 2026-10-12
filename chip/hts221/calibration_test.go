@@ -2,6 +2,7 @@ package hts221
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -132,18 +133,23 @@ func isDegenerate(b []byte) bool {
 
 // FuzzCalibration checks that no register image panics the parser, that
 // Validate accepts exactly the images that are not degenerate, and that the
-// error is always ErrCalibration. The seed corpus holds the case reported on
-// real chips, in which both humidity points read the same count.
+// error is always ErrCalibration; and, for every image Validate accepts and any
+// count, that conversion is finite and monotonic in the direction of the line.
+// The seed corpus holds the case reported on real chips, in which both humidity
+// points read the same count.
 func FuzzCalibration(f *testing.F) {
-	f.Add(block(40, 160, 160, 0x80, 0x08, -500, 7500, -200, 2200))
-	f.Add(block(40, 160, 160, 0x80, 0x08, 0, 0, -200, 2200))        // identical humidity counts, the reported case
-	f.Add(block(40, 160, 160, 0x80, 0x08, -500, 7500, 0, 0))        // identical temperature counts
-	f.Add(block(40, 40, 160, 0x80, 0x08, -500, 7500, -200, 2200))   // identical humidity references
-	f.Add(block(40, 160, 0x80, 0x80, 0x00, -500, 7500, -200, 2200)) // identical temperature references
-	f.Add(block(0, 0, 0, 0, 0, 0, 0, 0, 0))
-	f.Add(block(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, -1, -1, -1, -1))
-	f.Add(make([]byte, calibrationLen))
-	f.Fuzz(func(t *testing.T, b []byte) {
+	for _, raw := range []int16{0, 1, -1, 3500, math.MaxInt16, math.MinInt16} {
+		f.Add(block(40, 160, 160, 0x80, 0x08, -500, 7500, -200, 2200), raw)
+		f.Add(block(40, 160, 160, 0x80, 0x08, 0, 0, -200, 2200), raw)        // identical humidity counts, the reported case
+		f.Add(block(40, 160, 160, 0x80, 0x08, -500, 7500, 0, 0), raw)        // identical temperature counts
+		f.Add(block(40, 40, 160, 0x80, 0x08, -500, 7500, -200, 2200), raw)   // identical humidity references
+		f.Add(block(40, 160, 0x80, 0x80, 0x00, -500, 7500, -200, 2200), raw) // identical temperature references
+		f.Add(block(160, 40, 160, 0x80, 0x08, 7500, -500, 2200, -200), raw)  // both lines decreasing
+		f.Add(block(0, 0, 0, 0, 0, 0, 0, 0, 0), raw)
+		f.Add(block(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, -1, -1, -1, -1), raw)
+		f.Add(block(0, 200, 0xFF, 0xFF, 0x0F, math.MinInt16, math.MaxInt16, math.MinInt16, math.MaxInt16), raw)
+	}
+	f.Fuzz(func(t *testing.T, b []byte, raw int16) {
 		if len(b) != calibrationLen {
 			t.Skip()
 		}
@@ -156,6 +162,35 @@ func FuzzCalibration(f *testing.F) {
 			t.Fatalf("a usable calibration was refused: %x -> %+v: %v", b, cal, err)
 		case err != nil && !errors.Is(err, vane.ErrCalibration):
 			t.Fatalf("error %v does not match ErrCalibration", err)
+		}
+		if err != nil {
+			return
+		}
+
+		h, _ := cal.humidity(raw)
+		tc := cal.temperature(raw)
+		for name, v := range map[string]float64{"humidity": h, "temperature": tc} {
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				t.Fatalf("%s(%d) = %v for %x", name, raw, v, b)
+			}
+		}
+		if h < 0 || h > 100 {
+			t.Fatalf("humidity(%d) = %v is outside 0 to 100 after clamping", raw, h)
+		}
+		if raw == math.MaxInt16 {
+			return
+		}
+		// One more count moves the value the way the line points, never the
+		// other way: the line rises when its two ends are ordered alike.
+		hNext, _ := cal.humidity(raw + 1)
+		dirH := (cal.H1RH - cal.H0RH) * float64(int(cal.H1T0Out)-int(cal.H0T0Out))
+		if (dirH > 0 && hNext < h) || (dirH < 0 && hNext > h) {
+			t.Fatalf("humidity is not monotonic at %d: %v then %v for %x", raw, h, hNext, b)
+		}
+		tNext := cal.temperature(raw + 1)
+		dirT := (cal.T1DegC - cal.T0DegC) * float64(int(cal.T1Out)-int(cal.T0Out))
+		if (dirT > 0 && tNext < tc) || (dirT < 0 && tNext > tc) {
+			t.Fatalf("temperature is not monotonic at %d: %v then %v for %x", raw, tc, tNext, b)
 		}
 	})
 }
