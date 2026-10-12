@@ -16,6 +16,7 @@ named `0000-` so it does not read as a decision or trip the index check.
 | ADR | Title | Status | Amended by |
 | --- | --- | --- | --- |
 | [`0002`](0002-direct-ioctl-backend.md) | The I2C backend is a direct `I2C_RDWR` ioctl through `x/sys`, not periph.io | Accepted | — |
+| [`0003`](0003-chip-identification.md) | Chips are identified by WHO_AM_I before any write; LPS25H/HB are one family; the HAT EEPROM is information only | Accepted | — |
 
 Each row links its file, so the index is navigable and the
 `check-docs.sh` cross-check can verify both directions.
@@ -28,6 +29,7 @@ never.
 | ADR | Reopen when |
 | --- | --- |
 | `0002` | A consumer needs vane over a periph.io bus — then a separate `periphbus` module |
+| `0003` | M1 or a later board shows a behavioural difference between LPS25H and LPS25HB, or a substitute chip behind the same WHO_AM_I |
 
 ## Open questions
 
@@ -40,7 +42,6 @@ Accepted.
 | ADR | Question | Issue | Depends on the Pi |
 | --- | --- | --- | --- |
 | `0001` | Hardware access when kernel drivers own the LPS25H and LSM9DS1 | #18 | yes — blocked by #14, #15, #16 |
-| `0003` | Chip identification and board revision (LPS25H/LPS25HB family) | #5 | no |
 | `0004` | Concurrency model | #6 | no |
 | `0005` | Default acquisition mode | #7 | no |
 | `0006` | Error model and partial failure | #8 | no |
