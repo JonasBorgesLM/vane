@@ -114,9 +114,18 @@ and force-pushed to the work branch — never to `develop` or `main`.
 go build ./... && go vet ./... && go test -race ./...
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./...
 golangci-lint run
+gosec -tests -exclude-generated ./...     # the CI runs it on its own, tests included
 ./.github/scripts/check-boundaries.sh
 ./.github/scripts/check-docs.sh
 ```
+
+### Suppressing a gosec finding
+
+Use `// #nosec G115 -- the reason`, not `//nolint:gosec`. golangci-lint honours
+both, but the CI also runs gosec on its own, over test files too, and that one
+reads only `#nosec`; a `nolint` passes locally and fails the pipeline. Give the
+reason on the line, and one `#nosec` covers only the line it is on or the one
+below.
 
 ## Hardware tests
 

@@ -148,26 +148,30 @@ func (e *KernelOwnedError) Is(target error) bool // target == ErrKernelOwned
 ## 3. Chip drivers — `chip/hts221`, `chip/lps25h`
 
 Both expose the same shape; the HTS221 is shown, the LPS25H differences follow.
+The HTS221 is implemented; this is its real API.
 
 ```go
 package hts221
 
 const DefaultAddress = 0x5F
 
-type Sensor struct{ /* bus, addr, cfg, calibration, mu sync.Mutex, buf [N]byte, closed bool */ }
+type Sensor struct{ /* regio.Dev, source, config, calibration, mu, scratch, clock, closed, reinit, dirty */ }
 
-// New identifies, calibrates and configures. The ORDER is the requirement:
-// nothing is written before identification succeeds (RF-01).
+// New identifies, calibrates and configures, in that order. The ORDER is the
+// requirement: nothing is written before identification succeeds (RF-01), and a
+// chip whose calibration is unusable is never configured.
 func New(ctx context.Context, bus vane.Bus, opts ...Option) (*Sensor, error)
 
-// Read returns one sample. One-shot: trigger → wait → read under the
-// sensor's mutex (RNF-04). Continuous: read the latest sample and flag
-// Stale/Overrun from the status register (RF-12).
+// Read returns one sample. One-shot (default): trigger → wait for both
+// data-ready bits → read, under the sensor's mutex (RNF-04). Continuous: read
+// the latest sample, flagged FlagStale per quantity when its data-ready bit is
+// clear. ErrNotReady after a trigger means the chip may have reset: the NEXT
+// Read identifies and configures again. Read never retries (G-11).
 func (s *Sensor) Read(ctx context.Context) (Sample, error)
 
 func (s *Sensor) Source() vane.Source
 func (s *Sensor) Calibration() Calibration
-func (s *Sensor) Close(ctx context.Context) error // power-down write; idempotent (RF-08)
+func (s *Sensor) Close(ctx context.Context) error // writes CTRL_REG1 = BDU (power-down, BDU kept on); idempotent
 
 type Sample struct {
 	Humidity    vane.Measurement[vane.RelativeHumidity]
@@ -175,19 +179,19 @@ type Sample struct {
 }
 
 type Calibration struct {
-	H0rH, H1rH       float64 // %RH at the two reference points
-	T0degC, T1degC   float64
-	H0T0Out, H1T0Out int16
-	T0Out, T1Out     int16
+	H0RH, H1RH     float64 // %RH at the two points
+	T0DegC, T1DegC float64 // °C at the two points
+	H0T0Out, H1T0Out, T0Out, T1Out int16
 }
-func (c Calibration) Validate() error // ErrCalibration when H0T0Out == H1T0Out or T0Out == T1Out (G-12)
+func (c Calibration) Validate() error // ErrCalibration: equal counts or equal references (G-12)
 
-type Mode struct{ /* oneShot bool; rate Rate */ }
-func OneShot() Mode            // default (ADR-0005)
+type Mode struct{ /* zero value is one-shot */ }
+func OneShot() Mode
 func Continuous(r Rate) Mode
+type Rate uint8 // Rate1Hz, Rate7Hz, Rate12Hz5: the ODR code in CTRL_REG1
 
-type Rate uint8   // 1 Hz, 7 Hz, 12.5 Hz
-type Averaging uint8
+// 0 keeps the chip default for that half: humidity 32, temperature 16.
+type Averaging struct{ Humidity, Temperature uint16 } // 4…512 and 2…256, powers of two
 
 type Option func(*config)
 func WithAddress(addr uint16) Option
@@ -196,8 +200,17 @@ func WithMode(m Mode) Option
 func WithAveraging(a Averaging) Option
 func WithClock(now func() time.Time) Option
 func WithPollInterval(d time.Duration) Option // default 5 ms
-func WithReadyTimeout(d time.Duration) Option // default: datasheet conversion time × 2
+func WithReadyTimeout(d time.Duration) Option // default 1 s: an over-estimate, conversion times unconfirmed
 ```
+
+**Recovery, and why it asks the chip.** After a wait ends in `ErrNotReady` the
+next `Read` identifies, reconfigures, then reads `CTRL_REG2`: `ONE_SHOT` is 1
+while a conversion is pending. A chip that reset reads 0 and holds nothing; one
+that merely stalled still reads 1, and the `Read` lets that conversion end and
+drains its sample before it triggers, because a second trigger on top of it is
+two sequences on one chip (ADR-0004). The same settling happens after a `Read`
+cut short by the context. (That `ONE_SHOT` reads back this way is listed in
+`docs/hardware.md` as still to confirm.)
 
 **LPS25H/LPS25HB** (`chip/lps25h`, `DefaultAddress = 0x5C`): `Sample` has
 `Pressure vane.Measurement[vane.Hectopascal]` instead of `Humidity`; no
