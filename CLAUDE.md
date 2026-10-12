@@ -41,16 +41,25 @@ sensehat ──▶ chip/hts221, chip/lps25h ──▶ vane (leaf) ◀── i2cd
 ## Commands
 
 ```bash
-./.github/scripts/check-docs.sh   # ADR index, requirement ids, relative links
+go build ./... && go vet ./... && go test -race ./...
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./...   # the target (RNF-01)
+golangci-lint run
+./.github/scripts/check-boundaries.sh   # x/sys only in i2cdev, vane is a leaf, no I2C_SLAVE_FORCE
+./.github/scripts/check-docs.sh         # ADR index, requirement ids, relative links
 ```
 
-Go commands arrive with the module (issue #10).
+CI (`.github/workflows/ci.yml`) runs all of these plus fuzzing, macOS/Windows
+tests, govulncheck, the git-flow and commit checks; `CI OK` is the one required
+check. Release is `.github/workflows/release.yml`, driven by `RELEASING.md`.
 
 ## Conventions
 
 - English in code, comments, docs, ADRs, issues and commits.
-- Conventional Commits; cite the requirement or ADR in the body (`Refs RF-01`).
-- Work on `develop` through PRs; releases on `main`; signed tags.
+- Git flow and commit format are in `CONTRIBUTING.md` and checked by CI:
+  `<type>/<issue>-<name>` branches squash into `develop`; only `release/*` and
+  `hotfix/*` reach `main`, by merge commit; tags are signed and never moved.
+- Conventional Commits with this project's scopes; the body says why and cites
+  the requirement or ADR (`Refs RF-01`).
 - Requirement ids are `RF-`, `RNF-`, `RI-`. Cross-project citations are
   qualified (`beacon/...`, `crier/...`) — unqualified ones are checked against
   this project's numbering by `check-docs.sh`.

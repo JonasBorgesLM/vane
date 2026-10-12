@@ -23,7 +23,7 @@ ID_PREFIXES="RF|RNF|RI"
 # ---------------------------------------------------------------------------
 
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 
 FAILED=0
 fail() { printf '\n\033[31mFAIL\033[0m  %s\n' "$1"; FAILED=1; }

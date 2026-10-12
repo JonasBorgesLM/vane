@@ -1,0 +1,282 @@
+# Release (CD).
+#
+# vane is a library: what ships is the tag, which proxy.golang.org serves to
+# `go get`. This workflow refuses to publish a release that cannot be consumed,
+# verified or attributed, and checks everything that can fail BEFORE the GitHub
+# release exists -- a tag is immutable once anyone has fetched it.
+#
+# Adapted from bastion's release.yml. Not yet watched succeeding: it lands
+# before v0.1.0, so the first release (#45) is also its first real run.
+# RELEASING.md says what to do if it fails half way.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.26"
+  GO_SUPPORTED_VERSION: "stable"
+  GOVULNCHECK_VERSION: "v1.7.0"
+  GORELEASE_VERSION: "v0.0.0-20260824195058-e88cd73687aa"
+  GOFLAGS: -mod=readonly
+  GOSUMDB: sum.golang.org
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    outputs:
+      toolchain: ${{ steps.toolchain.outputs.version }}
+      prerelease: ${{ steps.kind.outputs.prerelease }}
+    steps:
+      # Full history and tags: the checks below compare against main and
+      # against earlier tags.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_SUPPORTED_VERSION }}
+          cache-dependency-path: go.mod
+
+      - id: toolchain
+        run: echo "version=$(go version | awk '{print $3}')" >> "$GITHUB_OUTPUT"
+
+      - name: The tag is a SemVer version
+        id: kind
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'; then
+            echo "::error::'$TAG' is not vX.Y.Z or vX.Y.Z-rc.N"
+            exit 1
+          fi
+          case "$TAG" in
+            *-rc.*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)      echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      # Git flow: main holds released states only. A tag on a commit that is
+      # not on main was cut from a branch nobody merged through review.
+      - name: The tagged commit is on main
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$TAG^{commit}" origin/main; then
+            echo "::error::$TAG does not point to a commit on main"
+            exit 1
+          fi
+
+      # An old tag re-pushed must not produce notes or a diff for the wrong
+      # version. -rc tags sort before their release.
+      - name: This tag is the newest one
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          newest=$(git -c versionsort.suffix=-rc. tag --list 'v*' --sort=-v:refname | head -1)
+          if [ "$newest" != "$TAG" ]; then
+            echo "::error::expected $TAG to be the newest tag, found '${newest:-<none>}'"
+            exit 1
+          fi
+
+      - name: CHANGELOG has a section for this version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          if ! grep -qE "^## \[${version//./\\.}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$version]' section"
+            exit 1
+          fi
+
+      - name: Build, vet, test as a consumer resolves it
+        run: |
+          go mod verify
+          go build ./...
+          go vet ./...
+          go test -race ./...
+
+      - name: Cross-build for the target (RNF-01)
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: go build ./...
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+          govulncheck ./...
+
+      # Asserted again here because a published version is the one thing this
+      # repository cannot retract by pushing a fix.
+      - name: Boundaries and documentation still hold
+        run: |
+          ./.github/scripts/check-boundaries.sh
+          ./.github/scripts/check-docs.sh
+
+      # The API diff is generated, not written from memory. -base is explicit:
+      # left to infer, gorelease asks the proxy for the latest version, which
+      # may already be the tag being published, and diffs it against itself.
+      - name: Generate API diff
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          base=$(git -c versionsort.suffix=-rc. tag --list 'v*' --sort=-v:refname | grep -vxF "$TAG" | grep -vE -- '-rc\.' | head -1)
+          base="${base:-none}"
+          go install golang.org/x/exp/cmd/gorelease@${{ env.GORELEASE_VERSION }}
+          set +e
+          gorelease -base="$base" > "$RUNNER_TEMP/apidiff.txt" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/apidiff.txt"
+          if [ "$status" -ne 0 ]; then
+            # The one tolerated refusal: gorelease cannot suggest a version
+            # (first release, or the proxy already sees this tag). It only
+            # follows a diff already printed above.
+            if grep -q "^Can only suggest a release version when compared against the most recent version of this major:" "$RUNNER_TEMP/apidiff.txt"; then
+              echo "::warning::gorelease could not suggest a version; proceeding with the diff it produced"
+            else
+              echo "::error::gorelease exited $status comparing against $base"
+              exit "$status"
+            fi
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: apidiff
+          path: ${{ runner.temp }}/apidiff.txt
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Scoped to this job only, which runs after verify on a tag push.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.mod
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: ${{ runner.temp }}/artifacts
+
+      # A release nobody can attribute is worth less than no release.
+      - name: Verify the tag is signed by an allowed key
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! grep -qvE '^(#|$)' .github/allowed_signers; then
+            echo "::error::.github/allowed_signers has no key; no release can be verified"
+            exit 1
+          fi
+          git config gpg.ssh.allowedSignersFile "$GITHUB_WORKSPACE/.github/allowed_signers"
+          git verify-tag "$TAG"
+
+      - name: Source tarball of the tagged tree
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist"
+          # Uncompressed: one less source of byte-level variance (gzip header
+          # metadata) between this file and a consumer's own `git archive`.
+          git archive --format=tar --prefix="vane-${TAG}/" \
+            --output="$RUNNER_TEMP/dist/vane-${TAG}.tar" "$TAG"
+
+      # RF-14. Built only once the tool exists; until then the release is the
+      # source alone.
+      - name: vane-probe for linux/arm64
+        env:
+          TAG: ${{ github.ref_name }}
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: |
+          if [ ! -d cmd/vane-probe ]; then
+            echo "cmd/vane-probe does not exist yet; no binary in this release"
+            exit 0
+          fi
+          go build -trimpath -ldflags="-s -w -X main.version=${TAG}" \
+            -o "$RUNNER_TEMP/dist/vane-probe_${TAG}_linux_arm64" ./cmd/vane-probe
+
+      - name: Checksums
+        working-directory: ${{ runner.temp }}/dist
+        run: sha256sum ./* | tee SHA256SUMS
+
+      # Attests that these exact files, by digest, came from this workflow at
+      # this commit, after verify passed.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/dist/*
+
+      - name: Assemble release notes
+        env:
+          TAG: ${{ github.ref_name }}
+          TOOLCHAIN: ${{ needs.verify.outputs.toolchain }}
+        run: |
+          diff_file=$(find "$RUNNER_TEMP/artifacts" -type f -name apidiff.txt -print -quit)
+          if [ ! -s "$diff_file" ]; then
+            echo "::error::apidiff.txt missing or empty; the artifact upload must have failed"
+            exit 1
+          fi
+          version="${TAG#v}"
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            # The CHANGELOG section for this version, without its heading.
+            awk -v h="## [$version]" 'index($0, h) == 1 {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md
+            printf '\n### API changes (generated)\n\n```\n'
+            cat "$diff_file"
+            printf '```\n\n'
+            # The backticks are Markdown, not command substitution.
+            printf "Verified with \`%s\`; module floor Go %s (RNF-09).\n\n" "$TOOLCHAIN" "$GO_VERSION"
+            printf "Every file below has build provenance: "
+            printf "\`gh attestation verify <file> --repo %s\`.\n" "$GITHUB_REPOSITORY"
+          } > "$notes"
+          cat "$notes"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          flags=()
+          [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
+          gh release create "$TAG" "$RUNNER_TEMP"/dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "vane $TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --verify-tag "${flags[@]}"
+
+      # pkg.go.dev learns about a version when the proxy first serves it.
+      # Requesting it here makes the documentation appear with the release
+      # instead of on the first consumer's `go get`.
+      - name: Announce the version to proxy.golang.org
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mod=$(go list -m)
+          cd "$(mktemp -d)"
+          go mod init probe.local >/dev/null 2>&1
+          GOPROXY=https://proxy.golang.org GOFLAGS='' go list -m "${mod}@${TAG}"
