@@ -15,8 +15,9 @@ named `0000-` so it does not read as a decision or trip the index check.
 
 | ADR | Title | Status | Amended by |
 | --- | --- | --- | --- |
+| [`0002`](0002-direct-ioctl-backend.md) | The I2C backend is a direct `I2C_RDWR` ioctl through `x/sys`, not periph.io | Accepted | — |
 
-None written yet. Each row links its file, so the index is navigable and the
+Each row links its file, so the index is navigable and the
 `check-docs.sh` cross-check can verify both directions.
 
 ## Reopening criteria on the record
@@ -26,19 +27,19 @@ never.
 
 | ADR | Reopen when |
 | --- | --- |
+| `0002` | A consumer needs vane over a periph.io bus — then a separate `periphbus` module |
 
 ## Open questions
 
 Deferred deliberately, listed rather than left implicit — an undecided question
 that looks decided is the one that gets implemented by accident.
 
-Every v0.1 decision is still open. Numbers are reserved; none of these may be
-assumed in code until its ADR is Accepted.
+Numbers are reserved; none of these may be assumed in code until its ADR is
+Accepted.
 
 | ADR | Question | Issue | Depends on the Pi |
 | --- | --- | --- | --- |
 | `0001` | Hardware access when kernel drivers own the LPS25H and LSM9DS1 | #18 | yes — blocked by #14, #15, #16 |
-| `0002` | I2C backend: direct `ioctl` via `x/sys` or periph.io | #4 | no |
 | `0003` | Chip identification and board revision (LPS25H/LPS25HB family) | #5 | no |
 | `0004` | Concurrency model | #6 | no |
 | `0005` | Default acquisition mode | #7 | no |
