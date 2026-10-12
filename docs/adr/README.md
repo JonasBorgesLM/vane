@@ -19,6 +19,7 @@ named `0000-` so it does not read as a decision or trip the index check.
 | [`0003`](0003-chip-identification.md) | Chips are identified by WHO_AM_I before any write; LPS25H/HB are one family; the HAT EEPROM is information only | Accepted | — |
 | [`0004`](0004-concurrency-model.md) | A per-chip mutex covers trigger → wait → read; no bus-level lock, no goroutines | Accepted | — |
 | [`0005`](0005-one-shot-default.md) | One-shot is the default acquisition mode; BDU is always on | Accepted | — |
+| [`0006`](0006-errors-and-partial-failure.md) | Sentinels plus typed wrappers; failure per sensor, whole-call failure only when nothing worked | Accepted | — |
 
 Each row links its file, so the index is navigable and the
 `check-docs.sh` cross-check can verify both directions.
@@ -34,6 +35,7 @@ never.
 | `0003` | M1 or a later board shows a behavioural difference between LPS25H and LPS25HB, or a substitute chip behind the same WHO_AM_I |
 | `0004` | Measured `Environment` latency matters to beacon, or a second process uses the HAT in a real deployment |
 | `0005` | One-shot latency on the Pi 5 at default averaging exceeds beacon's sampling interval |
+| `0006` | A consumer needs a failure mode it can only express by parsing messages |
 
 ## Open questions
 
@@ -46,5 +48,4 @@ Accepted.
 | ADR | Question | Issue | Depends on the Pi |
 | --- | --- | --- | --- |
 | `0001` | Hardware access when kernel drivers own the LPS25H and LSM9DS1 | #18 | yes — blocked by #14, #15, #16 |
-| `0006` | Error model and partial failure | #8 | no |
 | `0007` | Write allowlist enforced in tests, not at runtime | #9 | no |
