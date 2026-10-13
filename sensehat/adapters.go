@@ -36,6 +36,8 @@ var probeTable = []probe{
 type adapter interface {
 	// open builds the driver. It is the first traffic to the chip.
 	open(ctx context.Context, bus vane.Bus, c *config) error
+	// identify only reads the chip's identity and changes nothing. Diagnose uses it.
+	identify(ctx context.Context, bus vane.Bus, c *config) error
 	// fill sets this chip's readings in env. If err is not nil the readings carry
 	// it and nothing is read; otherwise the chip is read. It returns the error the
 	// readings carry, or nil if the chip delivered.
@@ -70,6 +72,13 @@ func (a *htsAdapter) open(ctx context.Context, bus vane.Bus, c *config) (err err
 		c.hts,
 		hts221.WithAddress(a.src.Address))...)
 	return err
+}
+
+func (a *htsAdapter) identify(ctx context.Context, bus vane.Bus, c *config) error {
+	return hts221.Identify(ctx, bus, driverOptions(
+		[]hts221.Option{hts221.WithBusName(a.src.Bus)},
+		c.hts,
+		hts221.WithAddress(a.src.Address))...)
 }
 
 func (a *htsAdapter) fill(ctx context.Context, env *Environment, err error) error {
@@ -109,6 +118,13 @@ func (a *lpsAdapter) open(ctx context.Context, bus vane.Bus, c *config) (err err
 		c.lps,
 		lps25h.WithAddress(a.src.Address))...)
 	return err
+}
+
+func (a *lpsAdapter) identify(ctx context.Context, bus vane.Bus, c *config) error {
+	return lps25h.Identify(ctx, bus, driverOptions(
+		[]lps25h.Option{lps25h.WithBusName(a.src.Bus)},
+		c.lps,
+		lps25h.WithAddress(a.src.Address))...)
 }
 
 func (a *lpsAdapter) fill(ctx context.Context, env *Environment, err error) error {

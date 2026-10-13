@@ -3,6 +3,7 @@ package sensehat_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,9 +50,12 @@ func newBoard(t *testing.T) *board {
 
 // bind makes the kernel own the chip at addr on bus 1, as the rpi-sense overlay
 // does for the LPS25H.
-func (b *board) bind(addr uint16, driver string) {
+func (b *board) bind(addr uint16, driver string) { b.t.Helper(); b.bindOn(1, addr, driver) }
+
+// bindOn is bind on another bus.
+func (b *board) bindOn(bus int, addr uint16, driver string) {
 	b.t.Helper()
-	node := map[uint16]string{0x5C: "1-005c", 0x5F: "1-005f"}[addr]
+	node := fmt.Sprintf("%d-%04x", bus, addr)
 	dir := filepath.Join(b.root, "sys", "bus", "i2c", "devices", node)
 	drivers := filepath.Join(b.root, "sys", "bus", "i2c", "drivers", driver)
 	for _, d := range []string{dir, drivers} {
