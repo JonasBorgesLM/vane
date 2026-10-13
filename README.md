@@ -50,6 +50,20 @@ if env.Humidity.Err == nil {
 - Log. Errors carry chip, address, register and operation instead.
 - Drive the IMU, the colour sensor, the LED matrix or the joystick — not in v0.1.
 
+## Looking at a board
+
+`vane-probe` is a read-only check of what vane can do with a Sense HAT: it lists
+the I2C adapters, says for each chip whether the kernel already drives it, and
+for the free ones reads the identity register. It never writes to the bus.
+
+```
+go install github.com/JonasBorgesLM/vane/cmd/vane-probe@latest
+vane-probe -require all
+```
+
+The exit status is 0 when nothing prevents vane from working, 1 when the bus
+cannot be opened or a required chip is not usable, and 2 for a bad command line.
+
 ## Requirements
 
 Raspberry Pi 5 with a Sense HAT (v1 or v2), Raspberry Pi OS 64-bit, read/write
