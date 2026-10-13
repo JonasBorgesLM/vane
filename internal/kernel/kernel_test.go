@@ -3,6 +3,7 @@ package kernel_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -155,6 +156,9 @@ func TestADriverEntryThatIsNotALinkIsAnErrorNotAGuess(t *testing.T) {
 func TestAnUnreadablePathIsAnErrorNotAGuess(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads everything")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("a Windows directory mode does not stop reads, so the condition cannot be made")
 	}
 	s := newSysfs(t)
 	dir := s.mkdir("sys/bus/i2c/devices/1-005c")
