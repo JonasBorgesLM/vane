@@ -106,25 +106,25 @@ func (r Report) Missing() []vane.Chip {
 // chip that is not there and a chip the kernel owns are exactly what a diagnostic
 // is for. The returned error is for a configuration that makes no sense or a
 // context that ended.
-func Diagnose(ctx context.Context, opts ...Option) (Report, error) {
+func Diagnose(ctx context.Context, opts ...Option) (rep Report, err error) {
 	cfg := defaultConfig()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	if err := cfg.validate(); err != nil {
-		return Report{}, err
+	if verr := cfg.validate(); verr != nil {
+		return Report{}, verr
 	}
 	busNum, haveNum := kernel.BusNumber(cfg.busPath)
 	if cfg.kernelCheck && !haveNum {
 		return Report{}, fmt.Errorf("sensehat: cannot check kernel ownership on %q, which is not /dev/i2c-N; "+
 			"use WithKernelCheck(false) if it is not a kernel adapter", cfg.busPath)
 	}
-	if err := ctx.Err(); err != nil {
-		return Report{}, err
+	if cerr := ctx.Err(); cerr != nil {
+		return Report{}, cerr
 	}
 
-	rep := Report{Bus: cfg.busPath, Required: slices.Clone(cfg.required)}
-	if buses, err := kernel.Buses(cfg.root); err == nil {
+	rep = Report{Bus: cfg.busPath, Required: slices.Clone(cfg.required)}
+	if buses, berr := kernel.Buses(cfg.root); berr == nil {
 		for _, b := range buses {
 			rep.Buses = append(rep.Buses, BusInfo{Path: b.Path, Number: b.Number, Name: b.Name})
 		}
@@ -135,20 +135,24 @@ func Diagnose(ctx context.Context, opts ...Option) (Report, error) {
 
 	bus := cfg.bus
 	if !cfg.busSet {
-		b, err := i2cdev.Open(cfg.busPath)
-		if err != nil {
-			rep.BusErr = err
+		b, oerr := i2cdev.Open(cfg.busPath)
+		if oerr != nil {
+			rep.BusErr = oerr
 		} else {
 			bus = b
-			defer func() { _ = b.Close() }() // read-only use: a failed close loses nothing
+			defer func() {
+				if cerr := b.Close(); cerr != nil && err == nil {
+					err = cerr
+				}
+			}()
 		}
 	}
 
 	for _, p := range probeTable {
 		src := vane.Source{Chip: p.chip, Bus: cfg.busPath, Address: p.addr}
 		rep.Chips = append(rep.Chips, cfg.examine(ctx, bus, busNum, p.new(src), src, rep.BusErr))
-		if err := ctx.Err(); err != nil {
-			return rep, err
+		if cerr := ctx.Err(); cerr != nil {
+			return rep, cerr
 		}
 	}
 	return rep, nil
