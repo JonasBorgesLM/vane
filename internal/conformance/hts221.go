@@ -146,8 +146,9 @@ func HTS221(t *testing.T, tg Target) {
 			if c := sample.Temperature; c.Flags != 0 || c.Value < -10 || c.Value > 90 {
 				t.Errorf("read %d: temperature %v flags %q", i, c.Value, c.Flags)
 			}
-			if !sample.Humidity.Time.After(last) {
-				t.Errorf("read %d: the time did not advance", i)
+			// Before, not !After: a coarse clock (Windows) gives two quick reads one time.
+			if sample.Humidity.Time.Before(last) {
+				t.Errorf("read %d: the time went backwards", i)
 			}
 			last = sample.Humidity.Time
 			observe(t, "read %d: %.2f %%RH (raw %d), %.2f degC (raw %d)", i,
