@@ -105,3 +105,41 @@ option for the LPS25H.
 
 The LSM9DS1 facts, and everything about kernel ownership on the Pi, are in
 REQUIREMENTS Appendix A and still await M1.
+
+## The conformance suite
+
+`internal/conformance` is how the open questions above get settled. One set of
+checks runs twice: against the `vanetest` models in CI, and on a Sense HAT with
+`-tags hardware`. A check that passes on a model and fails on the chip is a model
+error, and the failure message names the assumption.
+
+The checks are an independent client of the chips: raw register access with the
+numbers repeated from the datasheet, not imported from the drivers or the models.
+
+Two kinds of statement:
+
+- **Assertions** hold for any correct chip and fail the test: identity, a stable
+  calibration block, a one-shot conversion that finishes, `ONE_SHOT` clearing
+  itself, data-ready bits clearing once their output was read, a one-shot ignored
+  while powered down, the driver leaving the chip powered down on `Close`, and
+  `FlagStale` appearing on an immediate second read in continuous mode.
+- **Observations** are `OBSERVATION:` lines in the log, for facts the datasheet has
+  not confirmed (does `ONE_SHOT` read back 1 while pending; does reading one byte
+  clear `H_DA`; the reserved registers inside the calibration block; the overrun
+  bits after a full read). They never fail. On the Pi they are the evidence:
+  copy each answer into the tables above and correct the model if it disagrees.
+
+Run it on the Pi from the development machine:
+
+```sh
+make hw-test HW_HOST=pi@raspberrypi.local HW_EXPECT=custom   # board set up for vane
+make hw-test HW_HOST=pi@raspberrypi.local HW_EXPECT=default  # stock overlay
+```
+
+`HW_EXPECT=custom` fails if a chip is not free for vane; `default` fails if a chip
+is not reported kernel-owned, and in that case no chip is written to. Left empty,
+the suite runs what it can and skips the rest. The raw checks never run on a chip a
+kernel driver owns. `TestHardwareLatency` logs the one-shot `Read` latency per chip
+(min, median, max over 20 reads); output is kept in `hw-results/`, not committed.
+
+The suite has not been run on a board yet (#42 stays open until it has).

@@ -65,6 +65,11 @@ linters:
       # ignores a cleanup error is not the risk this configuration exists for.
       - path: _test\.go$
         linters: [dupl, errcheck, gosec, goconst, unparam]
+      # internal/conformance is test code that go test cannot see as such: its two
+      # chips are checked in parallel on purpose, so that a change to one reads
+      # next to the other and does not hide behind a shared helper.
+      - path: ^internal/conformance/
+        linters: [dupl, errcheck, goconst]
 
 formatters:
   enable: [gofmt, goimports]

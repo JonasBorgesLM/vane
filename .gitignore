@@ -34,3 +34,6 @@ go.work.sum
 
 # Graphify (generated per machine)
 graphify-out/
+
+# Hardware suite output (docs/hardware.md quotes it)
+hw-results/
