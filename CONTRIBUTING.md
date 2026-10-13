@@ -90,6 +90,14 @@ Closes #26
 - One subject per commit. Stage files explicitly; do not `git add -A` a tree
   holding two subjects.
 
+### Closing keywords
+
+GitHub closes an issue when a merged commit message or pull request description
+holds a closing keyword (`close`, `fix`, `resolve`, in any form) next to its
+number, and it does not read negation. "Does not close #41" closes #41, which
+happened on #74. Write `Refs #41`, or just "#41 stays open", and keep the
+keyword for issues the change finishes.
+
 ### Signed commits
 
 The `main` and `develop` rulesets require **verified** signatures on every
