@@ -119,6 +119,22 @@ gosec -tests -exclude-generated ./...     # the CI runs it on its own, tests inc
 ./.github/scripts/check-docs.sh
 ```
 
+### Developing on macOS or Windows
+
+The Linux backend (`i2cdev`) and its tests sit behind a `//go:build linux` tag,
+so on another system `gosec` and `golangci-lint` do not look at them, the tests
+do not run, and a clean local run proves little about them. This is not
+hypothetical: it hid findings in `i2cdev` until the pipeline would have found
+them. Run the pipeline's Linux checks in a container before pushing:
+
+```bash
+./.github/scripts/ci-linux.sh    # needs docker; reads its tool versions from ci.yml
+```
+
+It runs as an ordinary user and not root, because the permission tests skip for
+root. The first run installs the linters into `~/.cache/vane-ci` and takes
+minutes; later runs take seconds.
+
 ### Suppressing a gosec finding
 
 Use `// #nosec G115 -- the reason`, not `//nolint:gosec`. golangci-lint honours

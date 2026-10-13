@@ -7,3 +7,5 @@ module github.com/JonasBorgesLM/vane
 // lower floor would only buy support for an unsupported toolchain. Raising this
 // line is a CHANGELOG entry, never a side effect of `go get`.
 go 1.26.0
+
+require golang.org/x/sys v0.49.0
