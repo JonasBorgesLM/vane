@@ -257,64 +257,90 @@ change that.
 
 ## 4. Board facade — `sensehat`
 
+Implemented. `Diagnose` and `vane-probe` (#41) come next.
+
 ```go
 package sensehat
 
-type Device struct{ /* sources []envSource, info []SensorInfo, board BoardInfo, mu, closed */ }
-
 func Open(ctx context.Context, opts ...Option) (*Device, error)
 func (d *Device) Environment(ctx context.Context) (Environment, error)
-func (d *Device) Sensors() []SensorInfo
+func (d *Device) Sensors() []SensorInfo // a copy; one entry per chip on the board, in a fixed order
 func (d *Device) Board() BoardInfo
-func (d *Device) Close() error
+func (d *Device) Close() error          // idempotent; the first call returns the errors
 
 type Environment struct {
 	Humidity     Reading[vane.RelativeHumidity]
 	Pressure     Reading[vane.Hectopascal]
-	Temperatures []Reading[vane.Celsius] // HTS221 first, then LPS25H (RI-03)
+	Temperatures []Reading[vane.Celsius] // one per requested chip, HTS221 first (RI-03)
 }
 
+// Err == nil ⇔ the Measurement is valid. A failed Reading still carries its Source.
 type Reading[T ~float64] struct {
 	vane.Measurement[T]
-	Err error // *vane.SensorError; Err == nil ⇔ Measurement valid
+	Err error
 }
 
 type State uint8 // StateReady, StateFailed, StateKernelOwned, StateNotRequested
 type SensorInfo struct {
 	Source vane.Source
 	State  State
-	Err    error
+	Err    error // why the chip is not ready
 }
 type BoardInfo struct {
-	Present                   bool
+	Present                     bool
 	Product, Vendor, ProductVer string
 }
 
-type Report struct { /* buses, per-address presence, identity, owner driver, board */ }
-func Diagnose(ctx context.Context, opts ...Option) (Report, error)
+var ErrNotRequested error // the Err of a chip WithChips left out
 
-// Options: WithBus, WithBusPath, WithChips, WithRequired, WithHTS221,
-// WithLPS25H, WithClock, WithKernelCheck, WithCloseTimeout, WithSysfsRoot
-// (tests only; default "/").
+// Options: WithBus, WithBusPath, WithChips, WithRequired, WithHTS221, WithLPS25H,
+// WithClock, WithKernelCheck, WithRoot, WithCloseTimeout.
 ```
 
-### The internal extension point (§2.4 of the requirements)
+**Decisions made while building it** (none contested enough for an ADR):
+
+- **The board's addresses are fixed.** The kernel check needs a chip's address
+  *before* its driver exists, because building a driver already reads the chip.
+  `WithHTS221(opts...)` passes opaque options, `WithAddress` among them, so the
+  facade appends its own `WithAddress` **last** and it wins. A different layout
+  is not a Sense HAT; use the drivers directly.
+- **The kernel check fails closed.** A bus path that is not `/dev/i2c-N` has no
+  sysfs node, and skipping the check silently would be failing open, so `Open`
+  refuses unless `WithKernelCheck(false)` says the bus is not a kernel adapter.
+  A check that errors (not "no such path") marks the chip failed, never "not
+  owned".
+- **`WithBusPath` always names the adapter**, even with `WithBus`: it is what the
+  kernel check and each `Source` use. `WithBus` only replaces the opening, and
+  then the caller keeps the bus; `Close` closes only a bus `Open` opened.
+- **`WithRoot`** (not `WithSysfsRoot`) because it moves the device tree as well as
+  sysfs.
+- **`WithCloseTimeout` is per chip.** One shared deadline let a slow chip use up
+  the budget and leave every later chip powered up; a test caught it. It bounds
+  the power-down transaction, not the wait for a `Read` in progress.
+- **A context that has ended needs no check in `Environment`**: the first
+  transaction of each driver does it, as the `vane.Bus` contract requires.
+- **Closing after a failed or cancelled `Open`** uses `context.WithoutCancel`:
+  the context that interrupted `Open` is the one that has ended, and the chips it
+  opened still have to be powered down.
+
+### The unexported adapter
 
 ```go
-// envSource is what the facade drives. Today each chip driver is wrapped by
-// one adapter; an IIO backend (v0.2) would be another implementation that does
-// not go through vane.Bus at all.
-type envSource interface {
-	Info() vane.Source
-	Fill(ctx context.Context, env *Environment) // sets its own fields, value or Err
-	Close(ctx context.Context) error
+// adapter drives one chip for the facade. Each chip fills different fields of an
+// Environment, whose types differ, so a small adapter per chip beats a switch.
+type adapter interface {
+	open(ctx context.Context, bus vane.Bus, c *config) error
+	fill(ctx context.Context, env *Environment, err error) error // the error the readings carry, or nil
+	absent(env *Environment)
+	close(ctx context.Context) error
 }
 ```
 
-`envSource` is unexported on purpose: it has one implementation per chip today,
-and exporting it would freeze a shape that the IIO backend has not tested yet.
-
----
+It stays unexported: with two chips there is nothing to gain from letting a
+caller supply a third, and exporting it would freeze a shape before the IIO
+backend (v0.2), which may need a different one, exists. The set of chips is a
+plain `probeTable` value — address, chip, constructor — that nothing registers
+into.
 
 ## 5. Backends and test doubles
 
@@ -454,8 +480,8 @@ func Board(root string) (product, vendor, productVer string, ok bool)
 
 1. Resolve the bus: `WithBus` or `i2cdev.Open(WithBusPath)`. `EACCES` → `ErrPermission` with the group hint (R-07).
 2. Read `BoardInfo` from `/proc/device-tree/hat/` — information only (RF-13, ADR-0003).
-3. For each chip in the probe table (filtered by `WithChips`):
-   1. **Kernel ownership first** (RF-07): `kernel.Owner` → `KernelOwnedError`, state `StateKernelOwned`. No bus traffic to that address.
+3. For each chip in the probe table (filtered by `WithChips`; the others are `StateNotRequested` and never touched):
+   1. **Kernel ownership first** (RF-07): `kernel.Owner` → `KernelOwnedError`, state `StateKernelOwned`. No bus traffic to that address. A check that cannot answer is `StateFailed`, never "not owned".
    2. `New` the driver (§6.2). Failure → state `StateFailed`, error kept.
 4. If a chip named in `WithRequired` failed → close what opened, return the joined errors (G-06).
 5. If no chip opened → close, return `errors.Join` of all (ADR-0006).
