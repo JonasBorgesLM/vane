@@ -257,7 +257,7 @@ change that.
 
 ## 4. Board facade — `sensehat`
 
-Implemented. `Diagnose` and `vane-probe` (#41) come next.
+Implemented, `Diagnose` included; `vane-probe` is `cmd/vane-probe`.
 
 ```go
 package sensehat
@@ -322,6 +322,41 @@ var ErrNotRequested error // the Err of a chip WithChips left out
 - **Closing after a failed or cancelled `Open`** uses `context.WithoutCancel`:
   the context that interrupted `Open` is the one that has ended, and the chips it
   opened still have to be powered down.
+
+### `Diagnose` and `vane-probe`
+
+```go
+// Diagnose never configures, powers up or writes to a chip. For each chip it asks
+// the kernel who owns it and, if no one does, reads the identity register
+// (hts221.Identify / lps25h.Identify) and nothing else.
+func Diagnose(ctx context.Context, opts ...Option) (Report, error)
+
+type Report struct {
+	Bus      string
+	BusErr   error       // why the bus did not open; the kernel findings are still filled in
+	Buses    []BusInfo   // from /sys/class/i2c-dev, as `i2cdetect -l` lists them
+	Board    BoardInfo
+	Chips    []ChipReport
+	Required []vane.Chip
+}
+func (r Report) Missing() []vane.Chip // required and not usable
+
+type Finding uint8 // Identified, KernelOwned, Absent, WrongChip, Unreachable, NotRequested
+```
+
+- **Problems are findings, not errors.** A bus that will not open, an absent chip
+  and a chip the kernel owns are what a diagnostic is for. The returned error is
+  for a configuration that makes no sense, a context that ended, or a bus that
+  would not close.
+- **`Identify`** is exported by each driver because the alternative was a third
+  copy of the identity register and its expected value (drivers, models, facade).
+  It is `New`'s first step and shares its code.
+- **`vane-probe [-bus] [-require hts221,lps25h|all]`** prints the adapters, the
+  HAT, and a finding with advice per chip. Exit 0 when nothing prevents vane from
+  working, 1 when the bus cannot be opened or a required chip is not usable, 2 for
+  a bad command line. A kernel-owned chip is a failure only if required. For that
+  case it does not invent a procedure: ADR-0001 is open, so it points there.
+- The version is set by the release build (`-X main.version=...`).
 
 ### The unexported adapter
 

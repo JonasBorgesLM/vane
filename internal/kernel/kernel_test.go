@@ -279,3 +279,50 @@ func TestBusNumber(t *testing.T) {
 		}
 	}
 }
+
+func TestBusesListsTheAdaptersInOrderWithTheirNames(t *testing.T) {
+	root := t.TempDir()
+	for name, adapter := range map[string]string{"i2c-1": "bcm2835 (i2c@7e804000)\n", "i2c-10": "other\x00", "i2c-2": ""} {
+		dir := filepath.Join(root, "sys", "class", "i2c-dev", name)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if adapter != "" {
+			if err := os.WriteFile(filepath.Join(dir, "name"), []byte(adapter), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	got, err := kernel.Buses(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []kernel.Bus{
+		{Number: 1, Path: "/dev/i2c-1", Name: "bcm2835 (i2c@7e804000)"},
+		{Number: 2, Path: "/dev/i2c-2", Name: ""},
+		{Number: 10, Path: "/dev/i2c-10", Name: "other"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Buses = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Buses[%d] = %+v, want %+v (numeric order: 10 comes after 2)", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBusesIgnoresWhatIsNotAnAdapterAndAMissingDirectoryIsNotAnError(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"i2c-x", "i2c--1", "other", "i2c-"} {
+		if err := os.MkdirAll(filepath.Join(root, "sys", "class", "i2c-dev", name), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := kernel.Buses(root); err != nil || len(got) != 0 {
+		t.Errorf("Buses = %+v, %v; want none", got, err)
+	}
+	if got, err := kernel.Buses(t.TempDir()); err != nil || len(got) != 0 {
+		t.Errorf("a system with no i2c-dev: Buses = %+v, %v; want none and no error", got, err)
+	}
+}

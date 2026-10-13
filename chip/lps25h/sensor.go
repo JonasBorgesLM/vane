@@ -66,11 +66,7 @@ func New(ctx context.Context, bus vane.Bus, opts ...Option) (*Sensor, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	s := &Sensor{
-		dev: regio.New(bus, cfg.addr),
-		src: vane.Source{Chip: vane.ChipLPS25H, Bus: cfg.bus, Address: cfg.addr},
-		cfg: cfg,
-	}
+	s := newSensor(bus, cfg)
 	// Built once: a method value made per call would allocate on every Read.
 	s.ready = s.dataReady
 	s.clk = poll.Reusable()
@@ -81,6 +77,32 @@ func New(ctx context.Context, bus vane.Bus, opts ...Option) (*Sensor, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// newSensor builds the Sensor New and Identify both start from.
+func newSensor(bus vane.Bus, cfg config) *Sensor {
+	return &Sensor{
+		dev: regio.New(bus, cfg.addr),
+		src: vane.Source{Chip: vane.ChipLPS25H, Bus: cfg.bus, Address: cfg.addr},
+		cfg: cfg,
+	}
+}
+
+// Identify reads the chip's identity register and does nothing else: no
+// calibration, no configuration, and above all no write. It is how a diagnostic
+// asks whether the chip is there and is the right one without changing its
+// state, which New cannot do since it powers the chip up. The error is the one
+// New returns at that step: a *vane.SensorError if the bus failed or nothing
+// acknowledged, and a *vane.IdentityError if something else answered.
+func Identify(ctx context.Context, bus vane.Bus, opts ...Option) error {
+	cfg := defaultConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if err := cfg.validate(); err != nil {
+		return err
+	}
+	return newSensor(bus, cfg).identify(ctx)
 }
 
 // Source describes where this sensor's measurements come from.

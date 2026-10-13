@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -117,4 +118,43 @@ func BusNumber(path string) (n int, ok bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// Bus is an I2C adapter the kernel knows of.
+type Bus struct {
+	Number int
+	// Path is the device node, such as /dev/i2c-1.
+	Path string
+	// Name is the adapter's own name, such as "bcm2835 (i2c@7e804000)", or empty
+	// if sysfs does not give one.
+	Name string
+}
+
+// Buses lists the I2C adapters under /sys/class/i2c-dev, the way `i2cdetect -l`
+// does, in order of number. A system with none, or with no such directory, has an
+// empty list and no error: that is an answer, not a failure.
+func Buses(root string) ([]Bus, error) {
+	dir := filepath.Join(root, "sys", "class", "i2c-dev")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("kernel: listing %s: %w", dir, err)
+	}
+	var buses []Bus
+	for _, e := range entries {
+		n, ok := strings.CutPrefix(e.Name(), "i2c-")
+		if !ok {
+			continue
+		}
+		num, err := strconv.Atoi(n)
+		if err != nil || num < 0 {
+			continue
+		}
+		name, _ := readProperty(filepath.Join(dir, e.Name(), "name"))
+		buses = append(buses, Bus{Number: num, Path: fmt.Sprintf("/dev/i2c-%d", num), Name: name})
+	}
+	slices.SortFunc(buses, func(a, b Bus) int { return a.Number - b.Number })
+	return buses, nil
 }
