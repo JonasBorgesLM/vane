@@ -436,11 +436,28 @@ func (r *Recorder) Err() error
 func NewReplayBus(t T, transcript io.Reader) *ReplayBus // T: Helper, Errorf, Cleanup
 func (b *ReplayBus) Remaining() int
 
-type FakeBoard struct{ /* script, step, closed */ }
+// FakeBoard is *sensehat.Device's method set, answering from a script.
 func NewFakeBoard(script ...Step) *FakeBoard
 func (f *FakeBoard) Environment(ctx context.Context) (sensehat.Environment, error)
-func (f *FakeBoard) Sensors() []sensehat.SensorInfo
-func (f *FakeBoard) Close() error
+func (f *FakeBoard) Sensors() []sensehat.SensorInfo // both chips ready until SetSensors
+func (f *FakeBoard) Board() sensehat.BoardInfo      // absent until SetBoard
+func (f *FakeBoard) Close() error                   // idempotent
+func (f *FakeBoard) SetSensors(infos ...sensehat.SensorInfo)
+func (f *FakeBoard) SetBoard(b sensehat.BoardInfo)
+func (f *FakeBoard) Closed() bool
+func (f *FakeBoard) Calls() int
+
+// Steps. Healthy fills every field a Device does; Failing wraps the chip's
+// error in a SensorError and, when every reading has failed, sets the top-level
+// error as a Device does. Past the end of the script, Environment returns
+// ErrScriptEnded, so a consumer that polls more than planned is noticed.
+func Healthy(at time.Time, rh vane.RelativeHumidity, p vane.Hectopascal, tHTS221, tLPS25H vane.Celsius) Step
+func Result(env sensehat.Environment, err error) Step
+func Fail(err error) Step
+func (s Step) Failing(chip vane.Chip, err error) Step
+func (s Step) Delayed(d time.Duration) Step
+func (s Step) Times(n int) Step
+func (s Step) Forever() Step
 ```
 
 A test file in `vanetest` declares the method set beacon depends on and asserts
