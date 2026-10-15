@@ -74,6 +74,10 @@ func HTS221(t *testing.T, tg Target) {
 		d := dev{t: t, bus: tg.Bus, addr: hAddr}
 		quiesce()
 		d.write(hCtrl1, hPD|hBDU)
+		// Drain a sample the chip may be holding from before this test. Seen on a
+		// Pi: with BDU on, stale data-ready flags make the wait below return before
+		// the conversion has even started, and ONE_SHOT still reads back 1.
+		d.block(hOut, 4)
 		d.write(hCtrl2, hOneShot)
 
 		// ASSUMPTION: ONE_SHOT reads back 1 while the conversion is pending. The
@@ -121,7 +125,7 @@ func HTS221(t *testing.T, tg Target) {
 			t.Errorf("a conversion ran while the chip was powered down. The model assumes ONE_SHOT is ignored then, " +
 				"and the driver's reset detection (ErrNotReady) relies on it")
 		}
-		observe(t, "CTRL_REG2 after ONE_SHOT was written to a powered-down chip: %#x (the model clears the bit at once)", d.read(hCtrl2))
+		observe(t, "CTRL_REG2 after ONE_SHOT was written to a powered-down chip: %#x (the model keeps the bit latched)", d.read(hCtrl2))
 	})
 
 	t.Run("the driver, one-shot", func(t *testing.T) {
