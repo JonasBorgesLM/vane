@@ -5,6 +5,7 @@ package conformance_test
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"os"
 	"slices"
 	"testing"
@@ -135,12 +136,21 @@ func TestHardwareLatency(t *testing.T) {
 		t.Logf("LATENCY %s one-shot Read over %d: min %v, median %v, max %v", name, n, d[0], d[n/2], d[n-1])
 	}
 	if c, ok := finding(rep, vane.ChipHTS221); ok && c.Usable() {
-		s, err := hts221.New(ctx, target(t).Bus)
-		if err != nil {
-			t.Fatal(err)
+		// Every averaging setting, in step: the conversion time grows with it, and
+		// the default (32/16) is the fourth. The LPS25H offers no averaging option
+		// while its sample counts are in conflict (docs/hardware.md).
+		bus := target(t).Bus
+		for h, tmp := uint16(4), uint16(2); h <= 512; h, tmp = h*2, tmp*2 {
+			avg := hts221.Averaging{Humidity: h, Temperature: tmp}
+			s, err := hts221.New(ctx, bus, hts221.WithAveraging(avg))
+			if err != nil {
+				t.Fatal(err)
+			}
+			measure(fmt.Sprintf("HTS221 averaging %d/%d", h, tmp), func() error { _, err := s.Read(ctx); return err })
+			if err := s.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
 		}
-		defer s.Close(ctx)
-		measure("HTS221", func() error { _, err := s.Read(ctx); return err })
 	}
 	if c, ok := finding(rep, vane.ChipLPS25H); ok && c.Usable() {
 		s, err := lps25h.New(ctx, target(t).Bus)
