@@ -90,6 +90,14 @@ Closes #26
 - One subject per commit. Stage files explicitly; do not `git add -A` a tree
   holding two subjects.
 
+### Closing keywords
+
+GitHub closes an issue when a merged commit message or pull request description
+holds a closing keyword (`close`, `fix`, `resolve`, in any form) next to its
+number, and it does not read negation. "Does not close #41" closes #41, which
+happened on #74. Write `Refs #41`, or just "#41 stays open", and keep the
+keyword for issues the change finishes.
+
 ### Signed commits
 
 The `main` and `develop` rulesets require **verified** signatures on every
@@ -114,9 +122,34 @@ and force-pushed to the work branch — never to `develop` or `main`.
 go build ./... && go vet ./... && go test -race ./...
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./...
 golangci-lint run
+gosec -tests -exclude-generated ./...     # the CI runs it on its own, tests included
 ./.github/scripts/check-boundaries.sh
 ./.github/scripts/check-docs.sh
 ```
+
+### Developing on macOS or Windows
+
+The Linux backend (`i2cdev`) and its tests sit behind a `//go:build linux` tag,
+so on another system `gosec` and `golangci-lint` do not look at them, the tests
+do not run, and a clean local run proves little about them. This is not
+hypothetical: it hid findings in `i2cdev` until the pipeline would have found
+them. Run the pipeline's Linux checks in a container before pushing:
+
+```bash
+./.github/scripts/ci-linux.sh    # needs docker; reads its tool versions from ci.yml
+```
+
+It runs as an ordinary user and not root, because the permission tests skip for
+root. The first run installs the linters into `~/.cache/vane-ci` and takes
+minutes; later runs take seconds.
+
+### Suppressing a gosec finding
+
+Use `// #nosec G115 -- the reason`, not `//nolint:gosec`. golangci-lint honours
+both, but the CI also runs gosec on its own, over test files too, and that one
+reads only `#nosec`; a `nolint` passes locally and fails the pipeline. Give the
+reason on the line, and one `#nosec` covers only the line it is on or the one
+below.
 
 ## Hardware tests
 

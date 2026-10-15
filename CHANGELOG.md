@@ -11,6 +11,63 @@ with no section here.
 
 ## [Unreleased]
 
+## [0.1.0-rc.1] - 2026-10-14
+
+**Release candidate for v0.1.0, the first usable version (milestones M1–M5).** Reads humidity, pressure and
+both chips' temperatures from a Sense HAT on a Raspberry Pi 5, without cgo,
+checked on the board.
+
+### Added
+
+- `vane`: unit types (`Celsius`, `Hectopascal`, `RelativeHumidity`),
+  `Measurement` with raw count, `Source`, time and quality `Flag`s; the `Bus`
+  interface; sentinel errors (`ErrNotPresent`, `ErrUnexpectedChip`,
+  `ErrKernelOwned`, `ErrPermission`, `ErrCalibration`, `ErrNotReady`,
+  `ErrClosed`) and typed wrappers (`SensorError`, `IdentityError`,
+  `KernelOwnedError`).
+- `chip/hts221`: identification before any write, factory calibration read and
+  validated (`Calibration.Validate`), one-shot by default and continuous on
+  request, averaging (`WithAveraging`), BDU always on, recovery after a chip
+  reset, `Identify` for read-only diagnosis.
+- `chip/lps25h`: the LPS25H/LPS25HB family, same guarantees, with the overrun
+  status bits reported as `FlagOverrun`.
+- `i2cdev`: the Linux backend, one `I2C_RDWR` per transaction, never
+  `I2C_SLAVE_FORCE`; a permission failure names the group to join.
+- `sensehat`: `Open` probes the board, checks kernel ownership through sysfs
+  before touching a chip, and opens what it can; `Environment` reads every
+  chip with failure per sensor; `Diagnose` is a read-only look at the board.
+- `cmd/vane-probe`: lists the adapters, the HAT and each chip's state;
+  `-require` turns an unusable chip into exit status 1.
+- `vanetest`: `FakeBus` with fault injection, independent register models of
+  both chips, `Recorder` and `ReplayBus` for transcripts, and `FakeBoard` with
+  the `*sensehat.Device` method set for consumers.
+- `overlays/vane-sense.dts`: disables the sensor nodes the HAT's EEPROM
+  overlay declares, so no kernel driver can bind; LED matrix and joystick keep
+  working.
+- Transcripts recorded on a Pi 5 for both chips, replayed in every `go test`.
+- A conformance suite run against the models in CI and on the board
+  (`make hw-test`); one-shot latency per averaging setting in the README.
+- `docs/hardware.md`: what the board was observed to do, with the evidence;
+  ADR-0001 (register access, the sysfs check as the only guard, the overlay
+  recommended), Accepted after the hardware recon.
+- README: Pi setup guide and a `FakeBoard` quick start.
+
+### Fixed
+
+- `vanetest` models now latch a `ONE_SHOT` written while the chip is powered
+  down and run it on power-up, as both chips were observed to do.
+
+### Known limitations
+
+- A kernel driver bound after `Open` is not detected, and `I2C_RDWR` does not
+  stop vane reaching it (ADR-0001).
+- Serialisation is per process: another process on the same chips is not
+  coordinated with.
+- No averaging option for the LPS25H while the datasheet's sample counts are in
+  conflict between sources (#17).
+- Checked on one board: Pi 5, Sense HAT v2, Raspberry Pi OS (Debian 13, kernel
+  6.12). Other distributions are untested.
+
 ## [0.0.1] - 2026-10-12
 
 **Foundations (milestone M0). No library code yet** — this version exists so

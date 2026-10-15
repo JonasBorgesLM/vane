@@ -120,7 +120,8 @@ var (
 type SensorError struct {
 	Source Source
 	Op     string // "identify", "calibrate", "configure", "trigger", "wait", "read", "close"
-	Reg    int    // register involved, -1 when none
+	Reg    uint8  // register involved, meaningful only when HasReg is set
+	HasReg bool   // the zero value means "no register", not register 0x00
 	Err    error
 }
 func (e *SensorError) Error() string
@@ -147,26 +148,30 @@ func (e *KernelOwnedError) Is(target error) bool // target == ErrKernelOwned
 ## 3. Chip drivers — `chip/hts221`, `chip/lps25h`
 
 Both expose the same shape; the HTS221 is shown, the LPS25H differences follow.
+The HTS221 is implemented; this is its real API.
 
 ```go
 package hts221
 
 const DefaultAddress = 0x5F
 
-type Sensor struct{ /* bus, addr, cfg, calibration, mu sync.Mutex, buf [N]byte, closed bool */ }
+type Sensor struct{ /* regio.Dev, source, config, calibration, mu, scratch, clock, closed, reinit, dirty */ }
 
-// New identifies, calibrates and configures. The ORDER is the requirement:
-// nothing is written before identification succeeds (RF-01).
+// New identifies, calibrates and configures, in that order. The ORDER is the
+// requirement: nothing is written before identification succeeds (RF-01), and a
+// chip whose calibration is unusable is never configured.
 func New(ctx context.Context, bus vane.Bus, opts ...Option) (*Sensor, error)
 
-// Read returns one sample. One-shot: trigger → wait → read under the
-// sensor's mutex (RNF-04). Continuous: read the latest sample and flag
-// Stale/Overrun from the status register (RF-12).
+// Read returns one sample. One-shot (default): trigger → wait for both
+// data-ready bits → read, under the sensor's mutex (RNF-04). Continuous: read
+// the latest sample, flagged FlagStale per quantity when its data-ready bit is
+// clear. ErrNotReady after a trigger means the chip may have reset: the NEXT
+// Read identifies and configures again. Read never retries (G-11).
 func (s *Sensor) Read(ctx context.Context) (Sample, error)
 
 func (s *Sensor) Source() vane.Source
 func (s *Sensor) Calibration() Calibration
-func (s *Sensor) Close(ctx context.Context) error // power-down write; idempotent (RF-08)
+func (s *Sensor) Close(ctx context.Context) error // writes CTRL_REG1 = BDU (power-down, BDU kept on); idempotent
 
 type Sample struct {
 	Humidity    vane.Measurement[vane.RelativeHumidity]
@@ -174,19 +179,19 @@ type Sample struct {
 }
 
 type Calibration struct {
-	H0rH, H1rH       float64 // %RH at the two reference points
-	T0degC, T1degC   float64
-	H0T0Out, H1T0Out int16
-	T0Out, T1Out     int16
+	H0RH, H1RH     float64 // %RH at the two points
+	T0DegC, T1DegC float64 // °C at the two points
+	H0T0Out, H1T0Out, T0Out, T1Out int16
 }
-func (c Calibration) Validate() error // ErrCalibration when H0T0Out == H1T0Out or T0Out == T1Out (G-12)
+func (c Calibration) Validate() error // ErrCalibration: equal counts or equal references (G-12)
 
-type Mode struct{ /* oneShot bool; rate Rate */ }
-func OneShot() Mode            // default (ADR-0005)
+type Mode struct{ /* zero value is one-shot */ }
+func OneShot() Mode
 func Continuous(r Rate) Mode
+type Rate uint8 // Rate1Hz, Rate7Hz, Rate12Hz5: the ODR code in CTRL_REG1
 
-type Rate uint8   // 1 Hz, 7 Hz, 12.5 Hz
-type Averaging uint8
+// 0 keeps the chip default for that half: humidity 32, temperature 16.
+type Averaging struct{ Humidity, Temperature uint16 } // 4…512 and 2…256, powers of two
 
 type Option func(*config)
 func WithAddress(addr uint16) Option
@@ -195,23 +200,51 @@ func WithMode(m Mode) Option
 func WithAveraging(a Averaging) Option
 func WithClock(now func() time.Time) Option
 func WithPollInterval(d time.Duration) Option // default 5 ms
-func WithReadyTimeout(d time.Duration) Option // default: datasheet conversion time × 2
+func WithReadyTimeout(d time.Duration) Option // default 1 s: an over-estimate, conversion times unconfirmed
 ```
 
-**LPS25H/LPS25HB** (`chip/lps25h`, `DefaultAddress = 0x5C`): `Sample` has
-`Pressure vane.Measurement[vane.Hectopascal]` instead of `Humidity`; no
-`Calibration` (the chip is factory-trimmed); `Rate` covers 1, 7, 12.5 and 25
-Hz; `func (s *Sensor) Variant() Variant` returns `VariantUnknown` unless the two
-can be told apart (ADR-0003). Pressure is a 24-bit two's-complement value and
-temperature a 16-bit one — **both sign-extended into `Raw`** before conversion.
+**Recovery, and why it asks the chip.** After a wait ends in `ErrNotReady` the
+next `Read` identifies, reconfigures, then reads `CTRL_REG2`: `ONE_SHOT` is 1
+while a conversion is pending. A chip that reset reads 0 and holds nothing; one
+that merely stalled still reads 1, and the `Read` lets that conversion end and
+drains its sample before it triggers, because a second trigger on top of it is
+two sequences on one chip (ADR-0004). The same settling happens after a `Read`
+cut short by the context. (That `ONE_SHOT` reads back this way is listed in
+`docs/hardware.md` as still to confirm.)
 
-**Where the writable set lives (ADR-0007).** Not in the driver: each
-`vanetest` model declares the registers the datasheet allows the host to write,
-and fails the test on any other write. Exporting a `Writable()` list from the
-driver was considered and dropped — it would be public API with no consumer,
-and an oracle copied from the driver checks nothing (the same reason models do
-not import `chip/*`). This refines REQUIREMENTS §6.1's one-line summary of
-ADR-0007, which says "each driver declares".
+**LPS25H/LPS25HB** (`chip/lps25h`, `DefaultAddress = 0x5C`) is implemented, with
+the same shape and these differences:
+
+```go
+type Sample struct {
+	Pressure    vane.Measurement[vane.Hectopascal] // Raw: 24-bit, sign-extended
+	Temperature vane.Measurement[vane.Celsius]     // Raw: 16-bit signed
+}
+
+// Rate1Hz, Rate7Hz, Rate12Hz5, Rate25Hz: the ODR code, in bits 6:4 of CTRL_REG1.
+func (s *Sensor) Variant() Variant // always VariantUnknown: nothing readable tells the chips apart
+```
+
+- **No `Calibration`**: the chip is factory-trimmed. No `Averaging` and no
+  `WithAveraging`: the sample counts per `AVGP`/`AVGT` code are a conflict
+  between sources (`docs/hardware.md`), so `RES_CONF` is left as the chip has it
+  and `New` writes `CTRL_REG1` and nothing else.
+- **Flags**: `FlagOverrun` can be set (the status register has `P_OR` and
+  `T_OR`), per quantity, in continuous mode; `FlagStale` likewise from the
+  data-ready bits; `FlagOutOfRange` for pressure outside 260–1260 hPa and
+  temperature above 105 °C; `FlagClamped` is never set. There is no lower
+  temperature bound: a 16-bit count at 480 per degree around 42.5 °C cannot go
+  below −25.77 °C.
+- **Pressure sign**: the 24-bit output is two's complement, and
+  `Raw` is sign-extended so a differential reading below zero stays negative.
+- `Variant` is a type with one value, `VariantUnknown`. `VariantH` and
+  `VariantHB` are added if the board shows a difference that can be read without
+  side effects; adding them does not break callers.
+
+The two drivers repeat the same recovery, settle and close logic. Two copies
+cost less than a shared engine that would need a callback for every difference
+(status bits, output length, configuration, conversion); a third chip would
+change that.
 
 ### What a driver must not do
 
@@ -224,64 +257,125 @@ ADR-0007, which says "each driver declares".
 
 ## 4. Board facade — `sensehat`
 
+Implemented, `Diagnose` included; `vane-probe` is `cmd/vane-probe`.
+
 ```go
 package sensehat
 
-type Device struct{ /* sources []envSource, info []SensorInfo, board BoardInfo, mu, closed */ }
-
 func Open(ctx context.Context, opts ...Option) (*Device, error)
 func (d *Device) Environment(ctx context.Context) (Environment, error)
-func (d *Device) Sensors() []SensorInfo
+func (d *Device) Sensors() []SensorInfo // a copy; one entry per chip on the board, in a fixed order
 func (d *Device) Board() BoardInfo
-func (d *Device) Close() error
+func (d *Device) Close() error          // idempotent; the first call returns the errors
 
 type Environment struct {
 	Humidity     Reading[vane.RelativeHumidity]
 	Pressure     Reading[vane.Hectopascal]
-	Temperatures []Reading[vane.Celsius] // HTS221 first, then LPS25H (RI-03)
+	Temperatures []Reading[vane.Celsius] // one per requested chip, HTS221 first (RI-03)
 }
 
+// Err == nil ⇔ the Measurement is valid. A failed Reading still carries its Source.
 type Reading[T ~float64] struct {
 	vane.Measurement[T]
-	Err error // *vane.SensorError; Err == nil ⇔ Measurement valid
+	Err error
 }
 
 type State uint8 // StateReady, StateFailed, StateKernelOwned, StateNotRequested
 type SensorInfo struct {
 	Source vane.Source
 	State  State
-	Err    error
+	Err    error // why the chip is not ready
 }
 type BoardInfo struct {
-	Present                   bool
+	Present                     bool
 	Product, Vendor, ProductVer string
 }
 
-type Report struct { /* buses, per-address presence, identity, owner driver, board */ }
-func Diagnose(ctx context.Context, opts ...Option) (Report, error)
+var ErrNotRequested error // the Err of a chip WithChips left out
 
-// Options: WithBus, WithBusPath, WithChips, WithRequired, WithHTS221,
-// WithLPS25H, WithClock, WithKernelCheck, WithCloseTimeout, WithSysfsRoot
-// (tests only; default "/").
+// Options: WithBus, WithBusPath, WithChips, WithRequired, WithHTS221, WithLPS25H,
+// WithClock, WithKernelCheck, WithRoot, WithCloseTimeout.
 ```
 
-### The internal extension point (§2.4 of the requirements)
+**Decisions made while building it** (none contested enough for an ADR):
+
+- **The board's addresses are fixed.** The kernel check needs a chip's address
+  *before* its driver exists, because building a driver already reads the chip.
+  `WithHTS221(opts...)` passes opaque options, `WithAddress` among them, so the
+  facade appends its own `WithAddress` **last** and it wins. A different layout
+  is not a Sense HAT; use the drivers directly.
+- **The kernel check fails closed.** A bus path that is not `/dev/i2c-N` has no
+  sysfs node, and skipping the check silently would be failing open, so `Open`
+  refuses unless `WithKernelCheck(false)` says the bus is not a kernel adapter.
+  A check that errors (not "no such path") marks the chip failed, never "not
+  owned".
+- **`WithBusPath` always names the adapter**, even with `WithBus`: it is what the
+  kernel check and each `Source` use. `WithBus` only replaces the opening, and
+  then the caller keeps the bus; `Close` closes only a bus `Open` opened.
+- **`WithRoot`** (not `WithSysfsRoot`) because it moves the device tree as well as
+  sysfs.
+- **`WithCloseTimeout` is per chip.** One shared deadline let a slow chip use up
+  the budget and leave every later chip powered up; a test caught it. It bounds
+  the power-down transaction, not the wait for a `Read` in progress.
+- **A context that has ended needs no check in `Environment`**: the first
+  transaction of each driver does it, as the `vane.Bus` contract requires.
+- **Closing after a failed or cancelled `Open`** uses `context.WithoutCancel`:
+  the context that interrupted `Open` is the one that has ended, and the chips it
+  opened still have to be powered down.
+
+### `Diagnose` and `vane-probe`
 
 ```go
-// envSource is what the facade drives. Today each chip driver is wrapped by
-// one adapter; an IIO backend (v0.2) would be another implementation that does
-// not go through vane.Bus at all.
-type envSource interface {
-	Info() vane.Source
-	Fill(ctx context.Context, env *Environment) // sets its own fields, value or Err
-	Close(ctx context.Context) error
+// Diagnose never configures, powers up or writes to a chip. For each chip it asks
+// the kernel who owns it and, if no one does, reads the identity register
+// (hts221.Identify / lps25h.Identify) and nothing else.
+func Diagnose(ctx context.Context, opts ...Option) (Report, error)
+
+type Report struct {
+	Bus      string
+	BusErr   error       // why the bus did not open; the kernel findings are still filled in
+	Buses    []BusInfo   // from /sys/class/i2c-dev, as `i2cdetect -l` lists them
+	Board    BoardInfo
+	Chips    []ChipReport
+	Required []vane.Chip
+}
+func (r Report) Missing() []vane.Chip // required and not usable
+
+type Finding uint8 // Identified, KernelOwned, Absent, WrongChip, Unreachable, NotRequested
+```
+
+- **Problems are findings, not errors.** A bus that will not open, an absent chip
+  and a chip the kernel owns are what a diagnostic is for. The returned error is
+  for a configuration that makes no sense, a context that ended, or a bus that
+  would not close.
+- **`Identify`** is exported by each driver because the alternative was a third
+  copy of the identity register and its expected value (drivers, models, facade).
+  It is `New`'s first step and shares its code.
+- **`vane-probe [-bus] [-require hts221,lps25h|all]`** prints the adapters, the
+  HAT, and a finding with advice per chip. Exit 0 when nothing prevents vane from
+  working, 1 when the bus cannot be opened or a required chip is not usable, 2 for
+  a bad command line. A kernel-owned chip is a failure only if required. For that
+  case it does not invent a procedure: ADR-0001 is open, so it points there.
+- The version is set by the release build (`-X main.version=...`).
+
+### The unexported adapter
+
+```go
+// adapter drives one chip for the facade. Each chip fills different fields of an
+// Environment, whose types differ, so a small adapter per chip beats a switch.
+type adapter interface {
+	open(ctx context.Context, bus vane.Bus, c *config) error
+	fill(ctx context.Context, env *Environment, err error) error // the error the readings carry, or nil
+	absent(env *Environment)
+	close(ctx context.Context) error
 }
 ```
 
-`envSource` is unexported on purpose: it has one implementation per chip today,
-and exporting it would freeze a shape that the IIO backend has not tested yet.
-
----
+It stays unexported: with two chips there is nothing to gain from letting a
+caller supply a third, and exporting it would freeze a shape before the IIO
+backend (v0.2), which may need a different one, exists. The set of chips is a
+plain `probeTable` value — address, chip, constructor — that nothing registers
+into.
 
 ## 5. Backends and test doubles
 
@@ -317,36 +411,88 @@ does write-then-read with a repeated start in one call.
 ```go
 package vanetest
 
-type FakeBus struct{ /* devices map[uint16]Device, faults, mu */ }
+// FakeBus routes by address, serialises transactions as a real bus does, logs
+// every one, and injects faults. Safe for concurrent use.
 func NewFakeBus(devices ...Device) *FakeBus
 func (b *FakeBus) Tx(ctx context.Context, addr uint16, w, r []byte) error
 func (b *FakeBus) Inject(addr uint16, f Fault)
-func (b *FakeBus) Writes(addr uint16) [][]byte // for assertions: every write, in order
+func (b *FakeBus) Clear(addr uint16)        // drops faults, releases a stalled data-ready
+func (b *FakeBus) Log() []Tx                // deep copies; Tx{Addr, W, R, Err}
+func (b *FakeBus) Writes(addr uint16) [][]byte // for "nothing written before WHO_AM_I"
 
 type Device interface {
 	Addr() uint16
 	Tx(w, r []byte) error
 }
 
-type Fault struct{ /* kind: NACK, ShortRead, EIO, Latency(d), StuckNotReady, Reset; after N tx */ }
+// Faults. After(n) lets n transactions through first; Times(n) bounds how many
+// are affected (0 = until Clear). StallReady and Reset are events: Times(1).
+func NACK() Fault                    // vane.ErrNotPresent; the device never sees it
+func EIO() Fault                     // ErrIO; the device never sees it
+func ShortRead() Fault               // device runs, ErrShortRead, tail of r zeroed
+func Latency(d time.Duration) Fault  // holds the bus; the context can cut it
+func StallReady() Fault              // calls ReadyStaller.StallReady(true) once
+func Reset() Fault                   // calls Resetter.Reset() once, no bus error
 
-// Models are written from the datasheet; they import nothing from chip/*.
-// Every model rejects: a write to a register outside its writable set
-// (ADR-0007), a multi-byte read without the auto-increment bit (G-13), and an
-// interleaved trigger → read sequence (RNF-04).
+type Resetter interface{ Reset() }
+type ReadyStaller interface{ StallReady(stalled bool) }
+
+// Regs is the register file the chip models are built on. It enforces the
+// datasheet rules a real chip punishes silently, and reports each violation to
+// the test (Reporter, satisfied by *testing.T) as well as returning
+// ErrProtocol, so a driver that swallows the error still fails:
+//   - a write to a register outside the writable set (ADR-0007);
+//   - a multi-byte read or write without the auto-increment bit (G-13);
+//   - an access past the last register.
+func NewRegs(rep Reporter, addr uint16, writable ...uint8) *Regs
+func (r *Regs) Get(reg uint8) uint8
+func (r *Regs) Set(reg, val uint8)
+func (r *Regs) Tx(w, rd []byte) error
+
+// Chip models (#25, #31) embed Regs, are written from the datasheet and import
+// nothing from chip/*. The rule that a trigger → wait → read sequence is not
+// interleaved with another is the model's, not the bus's: only the model knows
+// what a sequence is.
 func NewHTS221(opts ...ModelOption) *HTS221Model
 func (m *HTS221Model) Set(rh vane.RelativeHumidity, t vane.Celsius)
 func NewLPS25H(opts ...ModelOption) *LPS25HModel
 func (m *LPS25HModel) Set(p vane.Hectopascal, t vane.Celsius)
 
-func NewRecorder(inner vane.Bus, w io.Writer) *Recorder // also a vane.Bus
-func NewReplayBus(t testing.TB, transcript io.Reader) *ReplayBus
+// Recorder wraps a bus and writes the transcript; a transaction cut short by
+// the context is not recorded. Comment adds the '#' metadata lines.
+func NewRecorder(inner vane.Bus, w io.Writer) *Recorder
+func (r *Recorder) Comment(format string, args ...any)
+func (r *Recorder) Err() error
 
-type FakeBoard struct{ /* script, step, closed */ }
+// ReplayBus requires each transaction to match the next recorded one (address,
+// bytes written, length read). The first divergence is a *DivergenceError,
+// reported to the test and sticky; a transcript not fully replayed is reported
+// when the test ends.
+func NewReplayBus(t T, transcript io.Reader) *ReplayBus // T: Helper, Errorf, Cleanup
+func (b *ReplayBus) Remaining() int
+
+// FakeBoard is *sensehat.Device's method set, answering from a script.
 func NewFakeBoard(script ...Step) *FakeBoard
 func (f *FakeBoard) Environment(ctx context.Context) (sensehat.Environment, error)
-func (f *FakeBoard) Sensors() []sensehat.SensorInfo
-func (f *FakeBoard) Close() error
+func (f *FakeBoard) Sensors() []sensehat.SensorInfo // both chips ready until SetSensors
+func (f *FakeBoard) Board() sensehat.BoardInfo      // absent until SetBoard
+func (f *FakeBoard) Close() error                   // idempotent
+func (f *FakeBoard) SetSensors(infos ...sensehat.SensorInfo)
+func (f *FakeBoard) SetBoard(b sensehat.BoardInfo)
+func (f *FakeBoard) Closed() bool
+func (f *FakeBoard) Calls() int
+
+// Steps. Healthy fills every field a Device does; Failing wraps the chip's
+// error in a SensorError and, when every reading has failed, sets the top-level
+// error as a Device does. Past the end of the script, Environment returns
+// ErrScriptEnded, so a consumer that polls more than planned is noticed.
+func Healthy(at time.Time, rh vane.RelativeHumidity, p vane.Hectopascal, tHTS221, tLPS25H vane.Celsius) Step
+func Result(env sensehat.Environment, err error) Step
+func Fail(err error) Step
+func (s Step) Failing(chip vane.Chip, err error) Step
+func (s Step) Delayed(d time.Duration) Step
+func (s Step) Times(n int) Step
+func (s Step) Forever() Step
 ```
 
 A test file in `vanetest` declares the method set beacon depends on and asserts
@@ -357,12 +503,21 @@ both `*sensehat.Device` and `*FakeBoard` satisfy it, so they cannot drift
 
 ```go
 package regio // register access for ST chips (G-13)
-func Read(ctx context.Context, b vane.Bus, addr uint16, reg uint8) (uint8, error)
-func Write(ctx context.Context, b vane.Bus, addr uint16, reg, val uint8) error
-func ReadBlock(ctx context.Context, b vane.Bus, addr uint16, reg uint8, dst []byte) error // sets 0x80 on reg
+// Dev owns a scratch buffer so reads allocate nothing (RNF-08): a buffer local
+// to a function escapes through the Bus interface (measured, 2 allocs/op).
+// Not safe for concurrent use; the driver's per-chip mutex covers it (ADR-0004).
+type Dev struct{ /* bus, addr, buf [2]byte */ }
+func New(b vane.Bus, addr uint16) *Dev
+func (d *Dev) Read(ctx context.Context, reg uint8) (uint8, error)
+func (d *Dev) Write(ctx context.Context, reg, val uint8) error
+func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error // sets 0x80; the only place that does
 
 package poll // data-ready wait (RNF-05)
-func Until(ctx context.Context, interval, timeout time.Duration, ready func(context.Context) (bool, error)) error
+type Clock interface { Now() time.Time; Sleep(ctx context.Context, d time.Duration) error }
+var Real Clock // wall clock; tests inject one that advances virtual time
+// nil clk means Real. ErrNotReady at the timeout, ctx.Err() on cancellation;
+// ready is called once more at the deadline.
+func Until(ctx context.Context, clk Clock, interval, timeout time.Duration, ready func(context.Context) (bool, error)) error
 
 package kernel // sysfs and device tree, root injectable for tests
 func Owner(root string, bus int, addr uint16) (driver string, owned bool, err error)
@@ -377,8 +532,8 @@ func Board(root string) (product, vendor, productVer string, ok bool)
 
 1. Resolve the bus: `WithBus` or `i2cdev.Open(WithBusPath)`. `EACCES` → `ErrPermission` with the group hint (R-07).
 2. Read `BoardInfo` from `/proc/device-tree/hat/` — information only (RF-13, ADR-0003).
-3. For each chip in the probe table (filtered by `WithChips`):
-   1. **Kernel ownership first** (RF-07): `kernel.Owner` → `KernelOwnedError`, state `StateKernelOwned`. No bus traffic to that address.
+3. For each chip in the probe table (filtered by `WithChips`; the others are `StateNotRequested` and never touched):
+   1. **Kernel ownership first** (RF-07): `kernel.Owner` → `KernelOwnedError`, state `StateKernelOwned`. No bus traffic to that address. A check that cannot answer is `StateFailed`, never "not owned".
    2. `New` the driver (§6.2). Failure → state `StateFailed`, error kept.
 4. If a chip named in `WithRequired` failed → close what opened, return the joined errors (G-06).
 5. If no chip opened → close, return `errors.Join` of all (ADR-0006).
@@ -396,7 +551,7 @@ that the first write in the recorded sequence comes after the `WHO_AM_I` read.
 ### 6.3 One-shot `Read`
 
 1. Lock the sensor's mutex — trigger → wait → read is atomic per chip (RNF-04).
-2. `ctx` checked; write `ONE_SHOT`.
+2. `ctx` checked; write `ONE_SHOT` through the sensor's `regio.Dev`.
 3. `poll.Until` on the status register, `ctx` checked each iteration (RNF-05).
    Timeout → `ErrNotReady`; mark the sensor for re-initialisation (G-11).
 4. `ReadBlock` the data registers; sign-extend into `Raw`; convert; clamp and flag (RF-12).
@@ -444,10 +599,12 @@ alternative, so the reason is kept.
 5f W 0f R bc                 # HTS221 WHO_AM_I
 5f W b0 R 3a 4c ...          # calibration block, 0x30 | 0x80 auto-increment
 5f W 20 85                   # write-only: CTRL_REG1 = PD | BDU | 1 Hz
-5c W 0f E nack               # error lines: E <nack|eio|short>
+5c W 0f E nack               # error lines: E <nack|eio|short|error>
 ```
 
 One transaction per line: address, `W` and the written bytes, then `R` and the
-read bytes or `E` and an error. `#` starts a comment. `ReplayBus` requires the
+read bytes or `E` and an error kind (`nack`, `eio`, `short`, or `error` for any
+other). The `# vane transcript v1` header is required, so another kind of file is
+refused rather than replayed as nonsense. `#` starts a comment. `ReplayBus` requires the
 address and written bytes to match exactly and the read length to match; any
 divergence fails the test with both lines printed.

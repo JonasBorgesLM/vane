@@ -677,6 +677,13 @@ translates it and applies what that review decided:
 | RNF-09 resolved (Go 1.26); R-09 and R-10 resolved. | `go.mod` and the module path exist (#54). |
 | Binding rule and §9 added; milestones mapped to M0–M6 with M1 ∥ M2. | Hardware recon no longer blocks work that does not need the Pi. |
 
+### Revisions after v0.2
+
+| Date | Change | Why |
+| --- | --- | --- |
+| 2026-10-12 | Appendix A: LPS25H temperature formula, pressure sign, LPS25HB identity and the auto-increment bit moved to Confirmed; averaging sample counts recorded as a conflict between sources | Same method as the HTS221 row; detail in [docs/hardware.md](docs/hardware.md) (#17, partly) |
+| 2026-10-12 | Appendix A: HTS221 data, calibration and the auto-increment bit moved to Confirmed | Read from the kernel driver and ST's reference header, not from memory; detail in [docs/hardware.md](docs/hardware.md) (#17, partly) |
+
 **ADR numbering, v0.1 → v0.2:** 0001 → 0001 · 0002 → 0002 · 0005 → 0003 ·
 0006 → 0004 · 0007 → 0005 · 0008 → 0006 · 0012 → 0007 · 0003, 0004, 0009, 0010 →
 `docs/architecture.md` · 0011 → deferred.
@@ -689,15 +696,15 @@ translates it and applies what that review decided:
 | --- | --- | --- | --- |
 | HTS221: address | 0x5F | Confirmed | `rpi-sense` overlay; Rust `sensehat` driver |
 | HTS221: WHO_AM_I | register 0x0F = 0xBC | Confirmed | Reference drivers (Nordic, mbed) and register map |
-| HTS221: data | humidity at 0x28, temperature at 0x2A (16-bit) | Probable | Register map (MrT) |
-| HTS221: calibration | block from 0x30 (H0_rH_x2 at 0x30, T0_degC_x8 at 0x32, T0/T1 high bits at 0x35) | Probable | Reference drivers; confirm in the datasheet |
+| HTS221: data | humidity at 0x28, temperature at 0x2A (16-bit signed, little-endian) | Confirmed | Kernel `hts221_core.c`; [docs/hardware.md](docs/hardware.md) |
+| HTS221: calibration | block from 0x30 (H0_rH_x2 at 0x30, T0_degC_x8 at 0x32, T0/T1 high bits at 0x35, `*_OUT` at 0x36, 0x3A, 0x3C, 0x3E) | Confirmed | Kernel `hts221_core.c` and ST `hts221_reg.h`; [docs/hardware.md](docs/hardware.md) |
 | HTS221: overlay | node exists but **disabled** | Confirmed | `rpi-sense-overlay.dts`, `rpi-sense-v2-overlay.dts` (rpi-6.12.y) |
 | LPS25H: address | 0x5C | Confirmed | Overlay; Rust driver |
 | LPS25H: WHO_AM_I | register 0x0F = 0xBD | Confirmed | ST header (with an internal inconsistency in a comment) and reference code |
-| LPS25HB: WHO_AM_I | 0xBD, register map compatible with LPS25H | Probable | AE-LPS25HB module maker's document |
-| LPS25H: pressure | 24 bits from 0x28; hPa = value / 4096 | Confirmed | ST header; reference code |
+| LPS25HB: WHO_AM_I | 0xBD, and the registers vane uses match the LPS25H's | Confirmed | ST `lps25hb_reg.h` against the kernel's LPS25H block; [docs/hardware.md](docs/hardware.md) |
+| LPS25H: pressure | 24 bits from 0x28, **signed**; hPa = value / 4096 | Confirmed | ST header and reference code; kernel channel `sign = 's'` |
 | LPS25H: BDU and ONE_SHOT | BDU at bit 2 of CTRL_REG1; ONE_SHOT at bit 0 of CTRL_REG2; rates one-shot, 1, 7, 12.5, 25 Hz | Confirmed | ST header |
-| LPS25H: temperature | 42.5 + value / 480 (°C) | To confirm | Memory |
+| LPS25H: temperature | 42.5 + value / 480 (°C), 16-bit signed | Confirmed | ST `lps25hb_reg.c`; kernel `st_pressure_core.c`; [docs/hardware.md](docs/hardware.md) |
 | LPS25H: overlay | IIO driver **active** (`st,lps25h-press`) | Confirmed | Official overlays |
 | Sense HAT v2: chips | HTS221, LPS25HB, TCS3400 colour sensor | Probable | Reseller listings; Raspberry Pi change notice mentions qualified alternatives and a new colour sensor |
 | Sense HAT v2: kernel support | from 2022-10-31, version 5.15.74 | Confirmed | Raspberry Pi product change notice (PCN) |
@@ -707,7 +714,7 @@ translates it and applies what that review decided:
 | TCS3400 in the overlay | no node declared | Confirmed | v2 overlay |
 | LED/joystick microcontroller | 0x46; EEPROM write-protect register | Confirmed | Official Sense HAT documentation |
 | Pi 5: header bus | GPIO2/3 = i2c1 → normally `/dev/i2c-1` | Probable | pinout.xyz; confirm with `i2cdetect -l` |
-| ST block-read auto-increment bit | MSB of the sub-address | To confirm | Memory |
+| ST block-read auto-increment bit | MSB of the sub-address, for reads and writes | Confirmed (HTS221 and LPS25H) | Kernel `hts221_i2c.c`; kernel `st_sensors_i2c.c` for the LPS25H |
 
 ## Appendix B — Sanity check on the Pi 5
 

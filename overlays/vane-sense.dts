@@ -1,0 +1,55 @@
+// vane-sense: hand the Sense HAT's sensors to vane, keep the LED matrix and the
+// joystick with the kernel.
+//
+// The HAT's EEPROM makes the firmware load rpi-sense (v1) or rpi-sense-v2
+// before config.txt is read. That overlay declares the LSM9DS1 (0x1c, 0x6a) and
+// the LPS25H (0x5c) for kernel IIO drivers; whether one binds depends on the
+// kernel build (docs/hardware.md). This overlay, loaded after it, merges into
+// those nodes and disables them, so no driver can bind. The EEPROM is still
+// read, so /proc/device-tree/hat stays for vane-probe, and sensehat@46 (display
+// and joystick) is untouched.
+//
+// Not taken: force_eeprom_read=0 plus a full replacement overlay. It also
+// works, but drops /proc/device-tree/hat and copies the display and joystick
+// nodes, which then drift from the firmware's.
+//
+//   dtc -@ -I dts -O dtb -o vane-sense.dtbo vane-sense.dts
+//   sudo cp vane-sense.dtbo /boot/firmware/overlays/
+//   echo dtoverlay=vane-sense | sudo tee -a /boot/firmware/config.txt
+//
+// Keep every line of config.txt short, comments included. Observed on a Pi 5:
+// after a 98-character comment the firmware silently skipped the next line,
+// this dtoverlay, with nothing in `vclog -m` even under dtdebug=1; a 46-
+// character comment did not. `sudo vclog -m | grep vane-sense` must show
+// "Loaded overlay 'vane-sense'".
+//
+// The node names must match the firmware overlay's, or the fragment adds new
+// disabled nodes and the old ones stay enabled. Check after the reboot that
+// /sys/bus/i2c/devices/1-005c is gone.
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target = <&i2c1>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			lsm9ds1-magn@1c {
+				reg = <0x1c>;
+				status = "disabled";
+			};
+			lps25h-press@5c {
+				reg = <0x5c>;
+				status = "disabled";
+			};
+			lsm9ds1-accel@6a {
+				reg = <0x6a>;
+				status = "disabled";
+			};
+		};
+	};
+};
