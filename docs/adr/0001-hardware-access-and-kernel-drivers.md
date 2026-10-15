@@ -1,7 +1,7 @@
 # ADR-0001: vane drives the chips by register only, refuses a chip a kernel driver owns, and ships an overlay that keeps the kernel off the sensors
 
 ## Status
-Proposed — 2026-10-14
+Accepted — 2026-10-14
 
 ## Context
 The Sense HAT's EEPROM makes the Pi firmware load `rpi-sense` (v1) or
