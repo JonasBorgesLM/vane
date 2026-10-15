@@ -11,7 +11,9 @@ with no section here.
 
 ## [Unreleased]
 
-**First usable version (milestones M1–M5).** Reads humidity, pressure and
+## [0.1.0-rc.1] - 2026-10-14
+
+**Release candidate for v0.1.0, the first usable version (milestones M1–M5).** Reads humidity, pressure and
 both chips' temperatures from a Sense HAT on a Raspberry Pi 5, without cgo,
 checked on the board.
 
