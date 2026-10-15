@@ -34,8 +34,9 @@ if env.Humidity.Err == nil {
 - **Partial failure** — one chip failing does not hide the others' readings.
 - **Identification before any write** — each chip's WHO_AM_I is checked first;
   a wrong chip receives nothing.
-- **Respects the kernel** — on a standard Raspberry Pi OS the kernel already
-  drives the LPS25H; vane detects that and refuses with an explanation instead
+- **Respects the kernel** — when a kernel driver is bound to a chip (the
+  Sense HAT overlay declares the LPS25H for one; whether it binds depends on
+  the kernel build), vane detects that and refuses with an explanation instead
   of fighting the kernel's driver for the chip.
 - **Testable without hardware** — `vanetest` offers a register-level fake bus
   for driver tests and a board fake for consumers.

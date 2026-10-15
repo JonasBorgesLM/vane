@@ -3,9 +3,10 @@
 Guidance for Claude Code in this repository. The general engineering rules are
 in `~/.claude/CLAUDE.md`; this file carries only what is true of vane.
 
-**Status: pre-code.** No Go module exists yet. Everything under *Architecture*
-is the plan in `REQUIREMENTS.md` and `docs/architecture.md`, not a description
-of code. Update this file in the same change that makes a section real.
+**Status: v0.1 in progress.** The root package, `i2cdev`, both drivers,
+`sensehat`, `vanetest` and `cmd/vane-probe` exist and are tested; what remains
+open is on the issue tracker. `REQUIREMENTS.md` and `docs/architecture.md` are
+the plan the code is checked against.
 
 ## Project Overview
 
@@ -76,10 +77,15 @@ check. Release is `.github/workflows/release.yml`, driven by `RELEASING.md`.
 
 ## Known Constraints
 
-- On a standard Raspberry Pi OS install, the `rpi-sense` overlay loaded from the
-  HAT EEPROM binds kernel IIO drivers to the LPS25H (0x5C) and LSM9DS1. Raw
-  register access to those chips competes with the kernel. How vane handles
-  this is ADR-0001, still open.
+- The `rpi-sense` overlay loaded from the HAT EEPROM declares the LPS25H (0x5C)
+  and LSM9DS1 for kernel IIO drivers. Whether a driver binds depends on the
+  kernel build: on the Pi 5 image in `docs/hardware.md` (6.12.62) none does.
+  `I2C_RDWR` does not check for a bound driver, so vane's sysfs check is the
+  only guard (#15). `overlays/vane-sense.dts` disables the sensor nodes so no
+  driver can bind (#16). How vane handles a bound driver is ADR-0001, still open.
+- The Pi is reached as `ssh raspberrypi.local` (key auth, `~/.ssh/config`);
+  `make hw-test HW_HOST=raspberrypi.local HW_EXPECT=custom` runs the suite.
+  `/usr/sbin` is not on `PATH` over non-interactive SSH.
 - Serialisation is per process only. Another process on the same bus is not
   coordinated with.
 
