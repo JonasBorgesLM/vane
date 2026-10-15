@@ -11,11 +11,12 @@ with no section here.
 
 ## [Unreleased]
 
-## [0.1.0-rc.1] - 2026-10-14
+## [0.1.0] - 2026-10-14
 
-**Release candidate for v0.1.0, the first usable version (milestones M1–M5).** Reads humidity, pressure and
+**First usable version (milestones M1–M5).** Reads humidity, pressure and
 both chips' temperatures from a Sense HAT on a Raspberry Pi 5, without cgo,
-checked on the board.
+checked on the board. No code changes since `0.1.0-rc.1`, whose release
+workflow ran clean.
 
 ### Added
 
@@ -67,6 +68,11 @@ checked on the board.
   conflict between sources (#17).
 - Checked on one board: Pi 5, Sense HAT v2, Raspberry Pi OS (Debian 13, kernel
   6.12). Other distributions are untested.
+
+## [0.1.0-rc.1] - 2026-10-14
+
+The candidate for 0.1.0, identical to it in code; its content is listed
+under 0.1.0.
 
 ## [0.0.1] - 2026-10-12
 
