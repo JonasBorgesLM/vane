@@ -1,0 +1,25 @@
+# vane transcript v1
+# HTS221 at 0x5f on /dev/i2c-1; scenario: New, 3 one-shot reads, Close
+# recorded 2026-10-15T00:51:44Z
+# kernel 6.12.62+rpt-rpi-2712
+# board Sense HAT, Raspberry Pi, version 0x0002
+5f W 0f R bc
+5f W b0 R 3c 8b a9 0f 00 c4 e8 ff e3 03 40 cb 00 00 a0 02
+5f W 10 1b
+5f W 20 84
+5f W 21 01
+5f W 27 R 00
+5f W 27 R 03
+5f W a8 R fd e4 59 03
+5f W 21 01
+5f W 27 R 00
+5f W 27 R 03
+5f W a8 R f4 e4 5c 03
+5f W 21 01
+5f W 27 R 00
+5f W 27 R 03
+5f W a8 R e7 e4 54 03
+5f W 20 04
+# expect read 0: humidity 50.1925 raw -6915 flags [], temperature 37.3850 raw 857 flags []
+# expect read 1: humidity 50.2188 raw -6924 flags [], temperature 37.4420 raw 860 flags []
+# expect read 2: humidity 50.2569 raw -6937 flags [], temperature 37.2902 raw 852 flags []
