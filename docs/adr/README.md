@@ -15,6 +15,7 @@ named `0000-` so it does not read as a decision or trip the index check.
 
 | ADR | Title | Status | Amended by |
 | --- | --- | --- | --- |
+| [`0001`](0001-hardware-access-and-kernel-drivers.md) | Register access only; a chip a kernel driver owns is refused; `overlays/vane-sense.dts` keeps the kernel off the sensors | Accepted | — |
 | [`0002`](0002-direct-ioctl-backend.md) | The I2C backend is a direct `I2C_RDWR` ioctl through `x/sys`, not periph.io | Accepted | — |
 | [`0003`](0003-chip-identification.md) | Chips are identified by WHO_AM_I before any write; LPS25H/HB are one family; the HAT EEPROM is information only | Accepted | — |
 | [`0004`](0004-concurrency-model.md) | A per-chip mutex covers trigger → wait → read; no bus-level lock, no goroutines | Accepted | — |
@@ -38,6 +39,7 @@ never.
 | `0005` | One-shot latency on the Pi 5 at default averaging exceeds beacon's sampling interval |
 | `0006` | A consumer needs a failure mode it can only express by parsing messages |
 | `0007` | A third-party driver is accepted, or a recorded transcript shows a write a model rejects |
+| `0001` | A consumer cannot change `config.txt` and the kernel binds the LPS25H; a stock kernel ships `st_pressure_i2c`; a driver bound after `Open` is reported |
 
 ## Open questions
 
@@ -49,4 +51,4 @@ Accepted.
 
 | ADR | Question | Issue | Depends on the Pi |
 | --- | --- | --- | --- |
-| `0001` | Hardware access when kernel drivers own the LPS25H and LSM9DS1 | #18 | yes — blocked by #14, #15, #16 |
+| — | None open. ADR-0001 was the last, Accepted after M1 | — | — |
