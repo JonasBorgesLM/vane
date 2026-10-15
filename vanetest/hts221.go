@@ -252,6 +252,8 @@ func (m *HTS221Model) afterWrite(w []byte) {
 		case hRegCtrl1:
 			if m.regs.Get(hRegCtrl1)&hCtrl1PD == 0 {
 				m.converting = false // power-down stops a conversion
+			} else {
+				m.startOneShot() // a ONE_SHOT latched while powered down runs now
 			}
 		case hRegCtrl2:
 			m.startOneShot()
@@ -265,10 +267,16 @@ func (m *HTS221Model) inOneShotMode() bool {
 }
 
 // startOneShot begins a conversion if the chip is able to: powered up and with
-// ODR = 0. Otherwise the request is ignored and the bit does not stay set.
+// ODR = 0. Powered down, the request is latched until power-up; in continuous
+// mode it is ignored and the bit does not stay set.
 func (m *HTS221Model) startOneShot() {
 	c2 := m.regs.Get(hRegCtrl2)
 	if c2&hCtrl2OneShot == 0 || m.converting {
+		return
+	}
+	if m.regs.Get(hRegCtrl1)&hCtrl1PD == 0 {
+		// Observed on a Pi (docs/hardware.md): written while powered down, the bit
+		// stays 1, nothing converts, and the conversion runs on power-up.
 		return
 	}
 	if !m.inOneShotMode() {

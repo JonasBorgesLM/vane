@@ -161,22 +161,41 @@ func TestHTS221OneShot(t *testing.T) {
 	}
 }
 
-func TestHTS221OneShotNeedsPowerUpAndODRZero(t *testing.T) {
-	for name, ctrl1 := range map[string]byte{
-		"power-down":         bdu,
-		"continuous (ODR=1)": pd | bdu | 1,
-	} {
-		h := newHTS(t)
-		_ = h.write(0x20, ctrl1)
-		_ = h.write(0x21, oneShot)
-		for range 50 {
-			if s := h.status(); s != 0 {
-				t.Fatalf("%s: a one-shot request completed (status %#x)", name, s)
-			}
+func TestHTS221OneShotIsIgnoredInContinuousMode(t *testing.T) {
+	h := newHTS(t)
+	_ = h.write(0x20, pd|bdu|1)
+	_ = h.write(0x21, oneShot)
+	for range 50 {
+		if s := h.status(); s != 0 {
+			t.Fatalf("a one-shot request completed (status %#x)", s)
 		}
-		if h.m.Peek(0x21)&oneShot != 0 {
-			t.Errorf("%s: an ignored request left ONE_SHOT set", name)
+	}
+	if h.m.Peek(0x21)&oneShot != 0 {
+		t.Errorf("an ignored request left ONE_SHOT set")
+	}
+}
+
+// Observed on a Pi (docs/hardware.md): the request is latched, not dropped.
+func TestHTS221OneShotWhilePoweredDownRunsOnPowerUp(t *testing.T) {
+	h := newHTS(t)
+	_ = h.write(0x20, bdu)
+	_ = h.write(0x21, oneShot)
+	for range 50 {
+		if s := h.status(); s != 0 {
+			t.Fatalf("a conversion ran while powered down (status %#x)", s)
 		}
+	}
+	if h.m.Peek(0x21)&oneShot == 0 {
+		t.Fatalf("ONE_SHOT written while powered down was dropped, want it latched")
+	}
+	_ = h.write(0x20, pd|bdu)
+	for i := 0; h.status() != hDA|tDA; i++ {
+		if i == 50 {
+			t.Fatalf("the latched one-shot did not run on power-up")
+		}
+	}
+	if h.m.Peek(0x21)&oneShot != 0 {
+		t.Errorf("ONE_SHOT still set after the latched conversion")
 	}
 }
 
