@@ -224,6 +224,8 @@ func (m *LPS25HModel) afterWrite(w []byte) {
 		case lRegCtrl1:
 			if m.regs.Get(lRegCtrl1)&lCtrl1PD == 0 {
 				m.converting, m.presPending = false, false
+			} else {
+				m.startOneShot() // a ONE_SHOT latched while powered down runs now
 			}
 		case lRegCtrl2:
 			m.startOneShot()
@@ -234,6 +236,11 @@ func (m *LPS25HModel) afterWrite(w []byte) {
 func (m *LPS25HModel) startOneShot() {
 	c2 := m.regs.Get(lRegCtrl2)
 	if c2&lCtrl2OneShot == 0 || m.converting {
+		return
+	}
+	if m.regs.Get(lRegCtrl1)&lCtrl1PD == 0 {
+		// Observed on a Pi (docs/hardware.md): written while powered down, the bit
+		// stays 1, nothing converts, and the conversion runs on power-up.
 		return
 	}
 	if !m.inOneShotMode() {
