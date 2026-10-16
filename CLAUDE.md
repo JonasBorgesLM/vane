@@ -3,10 +3,10 @@
 Guidance for Claude Code in this repository. The general engineering rules are
 in `~/.claude/CLAUDE.md`; this file carries only what is true of vane.
 
-**Status: v0.1 in progress.** The root package, `i2cdev`, both drivers,
-`sensehat`, `vanetest` and `cmd/vane-probe` exist and are tested; what remains
-open is on the issue tracker. `REQUIREMENTS.md` and `docs/architecture.md` are
-the plan the code is checked against.
+**Status: v0.1.0 released.** The root package, `i2cdev`, both drivers,
+`sensehat`, `vanetest` and `cmd/vane-probe` exist, are tested and were checked
+on a Pi 5; what remains open is on the issue tracker. `REQUIREMENTS.md` and
+`docs/architecture.md` are the plan the code is checked against.
 
 ## Project Overview
 
@@ -82,7 +82,7 @@ check. Release is `.github/workflows/release.yml`, driven by `RELEASING.md`.
   kernel build: on the Pi 5 image in `docs/hardware.md` (6.12.62) none does.
   `I2C_RDWR` does not check for a bound driver, so vane's sysfs check is the
   only guard (#15). `overlays/vane-sense.dts` disables the sensor nodes so no
-  driver can bind (#16). How vane handles a bound driver is ADR-0001, still open.
+  driver can bind (#16). ADR-0001 (Accepted) is how vane handles a bound driver.
 - The Pi is reached as `ssh raspberrypi.local` (key auth, `~/.ssh/config`);
   `make hw-test HW_HOST=raspberrypi.local HW_EXPECT=custom` runs the suite.
   `/usr/sbin` is not on `PATH` over non-interactive SSH.
