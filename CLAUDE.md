@@ -3,7 +3,7 @@
 Guidance for Claude Code in this repository. The general engineering rules are
 in `~/.claude/CLAUDE.md`; this file carries only what is true of vane.
 
-**Status: v0.1.0 released.** The root package, `i2cdev`, both drivers,
+**Status: v0.1.1 released.** The root package, `i2cdev`, both drivers,
 `sensehat`, `vanetest` and `cmd/vane-probe` exist, are tested and were checked
 on a Pi 5; what remains open is on the issue tracker. `REQUIREMENTS.md` and
 `docs/architecture.md` are the plan the code is checked against.
