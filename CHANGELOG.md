@@ -11,6 +11,14 @@ with no section here.
 
 ## [Unreleased]
 
+### Added
+
+- `chip/lps25h`: `WithAveraging(Averaging{Pressure, Temperature})`, now that
+  the datasheets settled the sample counts (#17) and the board the bit
+  positions. A zero field keeps the chip's own value, since the LPS25H and the
+  LPS25HB reset differently. One-shot latency goes from 40.4 ms at the
+  LPS25HB's 512/64 to 7.1 ms at 8/8.
+
 ## [0.1.1] - 2026-10-16
 
 ### Fixed

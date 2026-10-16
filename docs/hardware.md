@@ -130,6 +130,25 @@ field list under it puts `AVGP` in [3:2]. The LPS25HB datasheet's figure and
 ST's header both put `AVGT` in 3:2 and `AVGP` in 1:0. An averaging option must
 settle this on the board before writing the register (#17 follow-up).
 
+**Settled on the board (LPS25HB, by its `RES_CONF` reset value): `AVGP` is bits
+1:0, `AVGT` bits 3:2**, as the LPS25HB figure and ST's header say. Setting bits
+1:0 alone (0x03) lengthens a one-shot conversion from 2.5 ms to 32.6 ms; bits
+3:2 alone (0x0C) to 5.5 ms; and pressure averaging is the one that costs. The
+one-shot conversion time for every code, timed from the `ONE_SHOT` write to both
+data-ready bits by polling `STATUS_REG` as fast as the bus allows (median of 9,
+Pi 5, `RES_CONF` restored to 0x0F afterwards):
+
+| Pressure \ temperature samples | 8 | 16 | 32 | 64 |
+| --- | --- | --- | --- | --- |
+| 8 | 2.5 ms | 3.0 ms | 3.8 ms | 5.5 ms |
+| 32 | 3.8 ms | 4.2 ms | 5.1 ms | 7.2 ms |
+| 128 | 9.7 ms | 10.2 ms | 11.0 ms | 13.1 ms |
+| 512 | 32.6 ms | 33.0 ms | 34.3 ms | 36.0 ms |
+
+`chip/lps25h` offers `WithAveraging` from these facts. A board carrying an
+LPS25H rather than an LPS25HB would need the same timing check, since its own
+datasheet contradicts itself on the bit positions.
+
 ### LPS25H / LPS25HB — from the datasheets and the board
 
 Datasheets **LPS25H DocID023722 Rev 6** (October 2018, copy at
@@ -151,8 +170,7 @@ Datasheets **LPS25H DocID023722 Rev 6** (October 2018, copy at
 
 | Fact | Needed for | Where it can be settled |
 | --- | --- | --- |
-| Conversion time per averaging setting | the one-shot ready timeout (default 1 s) | not in either datasheet; measured on the board at the chip's default (40.3 ms) |
-| The `RES_CONF` bit positions on the LPS25H | an averaging option | the board, by writing a code and timing the conversion |
+| The `RES_CONF` bit positions on an LPS25H (this board carries an LPS25HB) | `WithAveraging` on such a board | a board with an LPS25H, timing as above |
 
 The LSM9DS1 facts, and everything about kernel ownership on the Pi, are in
 REQUIREMENTS Appendix A and still await M1.

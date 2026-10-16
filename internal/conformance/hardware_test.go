@@ -153,11 +153,23 @@ func TestHardwareLatency(t *testing.T) {
 		}
 	}
 	if c, ok := finding(rep, vane.ChipLPS25H); ok && c.Usable() {
-		s, err := lps25h.New(ctx, target(t).Bus)
-		if err != nil {
-			t.Fatal(err)
+		// Pressure averaging dominates the conversion, so it is swept fully and
+		// temperature at its ends. The last setting is 512/64, the LPS25HB's
+		// reset value: Close does not restore RES_CONF, and the next user of the
+		// chip should find it as the board ships.
+		bus := target(t).Bus
+		for _, tmp := range []uint16{8, 64} {
+			for _, p := range []uint16{8, 32, 128, 512} {
+				avg := lps25h.Averaging{Pressure: p, Temperature: tmp}
+				s, err := lps25h.New(ctx, bus, lps25h.WithAveraging(avg))
+				if err != nil {
+					t.Fatal(err)
+				}
+				measure(fmt.Sprintf("LPS25H averaging %d/%d", p, tmp), func() error { _, err := s.Read(ctx); return err })
+				if err := s.Close(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
 		}
-		defer s.Close(ctx)
-		measure("LPS25H", func() error { _, err := s.Read(ctx); return err })
 	}
 }

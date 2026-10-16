@@ -35,11 +35,11 @@ const (
 
 // LPS25HModel is a register-level model of the LPS25H or LPS25HB on a FakeBus.
 //
-// The writable set is the two control registers vane may touch, CTRL_REG1 and
-// CTRL_REG2. RES_CONF, CTRL_REG3 and 4, the reference, threshold and FIFO
-// registers are writable on the chip, but vane has no reason to write them
-// (averaging is deliberately left alone, see docs/hardware.md), so a write to
-// one is a driver bug and fails the test.
+// The writable set is the registers vane may touch: RES_CONF (averaging, with
+// its reserved bits 7:4 kept at 0), CTRL_REG1 and CTRL_REG2. CTRL_REG3 and 4,
+// the reference, threshold and FIFO registers are writable on the chip, but
+// vane has no reason to write them, so a write to one is a driver bug and fails
+// the test.
 //
 // Two further rules are vane's, not the chip's, and are reported: CTRL_REG1 is
 // never written with BDU off (ADR-0005) or with SIM, RESET_AZ or DIFF_EN set,
@@ -69,7 +69,7 @@ var (
 // state: power-down, no sample.
 func NewLPS25H(opts ...ModelOption) *LPS25HModel {
 	m := &LPS25HModel{opts: newModelOptions(opts)}
-	m.regs = NewRegs(m.opts.rep, lps25hAddr, lRegCtrl1, lRegCtrl2)
+	m.regs = NewRegs(m.opts.rep, lps25hAddr, lRegResConf, lRegCtrl1, lRegCtrl2)
 	id := uint8(0xBD)
 	if m.opts.whoAmI != nil {
 		id = *m.opts.whoAmI
@@ -145,6 +145,9 @@ func (m *LPS25HModel) Tx(w, rd []byte) error {
 func (m *LPS25HModel) checkWrite(w []byte) error {
 	reg := int(w[0] & regMask)
 	data := w[1:]
+	if i := lRegResConf - reg; i >= 0 && i < len(data) && data[i]&0xF0 != 0 {
+		return m.regs.violation("RES_CONF written as 0x%02x: bits 7:4 are reserved", data[i])
+	}
 	if i := lRegCtrl1 - reg; i >= 0 && i < len(data) {
 		v := data[i]
 		switch {

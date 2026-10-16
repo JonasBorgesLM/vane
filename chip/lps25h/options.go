@@ -16,11 +16,13 @@ type config struct {
 	pollInterval time.Duration
 	readyTimeout time.Duration
 	mode         Mode
+	avg          Averaging
 }
 
 // Defaults for waiting on a one-shot conversion. The timeout is a deliberate
-// over-estimate: the datasheet's conversion times are not confirmed yet (see
-// docs/hardware.md), and it only decides how long a failure takes to report.
+// over-estimate: the datasheet gives no conversion times, and on a Pi 5 they
+// run from 2.5 ms at the least averaging to 36 ms at the most (docs/hardware.md). It only decides how long a failure takes
+// to report.
 const (
 	defaultPollInterval = 5 * time.Millisecond
 	defaultReadyTimeout = time.Second
@@ -48,7 +50,7 @@ func (c *config) validate() error {
 	if c.mode.continuous && (c.mode.rate < Rate1Hz || c.mode.rate > Rate25Hz) {
 		return fmt.Errorf("lps25h: %d is not a continuous rate", c.mode.rate)
 	}
-	return nil
+	return c.avg.validate()
 }
 
 // WithAddress sets the I2C address. The default is DefaultAddress.
@@ -101,3 +103,60 @@ func Continuous(rate Rate) Mode { return Mode{continuous: true, rate: rate} }
 
 // WithMode sets the acquisition mode. The default is OneShot.
 func WithMode(m Mode) Option { return func(c *config) { c.mode = m } }
+
+// Averaging is how many internal samples the chip averages into each output,
+// separately for pressure and temperature. More samples means less noise and a
+// longer conversion: on a Pi 5, one-shot conversion takes 2.5 ms at 8/8 and
+// 36 ms at 512/64 (docs/hardware.md). Pressure dominates.
+//
+// A zero field keeps what the chip has for that quantity. The reset value is
+// not the same for the two chips of the family, 32/16 on the LPS25H and 512/64
+// on the LPS25HB, so there is no single default to restore.
+type Averaging struct {
+	Pressure    uint16 // 8, 32, 128 or 512
+	Temperature uint16 // 8, 16, 32 or 64
+}
+
+// The codes of RES_CONF, in the order of their values 00 to 11 (LPS25H
+// DocID023722 Rev 6 Tables 16-17, LPS25HB DocID027112 Rev 4 Tables 18-19).
+var (
+	pressureAvg    = [4]uint16{8, 32, 128, 512}
+	temperatureAvg = [4]uint16{8, 16, 32, 64}
+)
+
+func avgCode(table [4]uint16, n uint16) (uint8, bool) {
+	for code, v := range table {
+		if v == n {
+			return uint8(code), true // #nosec G115 -- code is 0 to 3
+		}
+	}
+	return 0, false
+}
+
+func (a Averaging) validate() error {
+	if _, ok := avgCode(pressureAvg, a.Pressure); a.Pressure != 0 && !ok {
+		return fmt.Errorf("lps25h: %d pressure samples is not one of 8, 32, 128, 512", a.Pressure)
+	}
+	if _, ok := avgCode(temperatureAvg, a.Temperature); a.Temperature != 0 && !ok {
+		return fmt.Errorf("lps25h: %d temperature samples is not one of 8, 16, 32, 64", a.Temperature)
+	}
+	return nil
+}
+
+// resConf returns RES_CONF with the requested fields replaced in cur, the
+// value the chip holds: AVGP in bits 1:0, AVGT in bits 3:2, the reserved bits
+// cleared.
+func (a Averaging) resConf(cur uint8) uint8 {
+	v := cur & (resConfAVGP | resConfAVGT)
+	if code, ok := avgCode(pressureAvg, a.Pressure); ok {
+		v = v&^resConfAVGP | code
+	}
+	if code, ok := avgCode(temperatureAvg, a.Temperature); ok {
+		v = v&^resConfAVGT | code<<resConfAVGTShift
+	}
+	return v
+}
+
+// WithAveraging sets the internal averaging. Without it, RES_CONF is left as
+// the chip has it.
+func WithAveraging(a Averaging) Option { return func(c *config) { c.avg = a } }
