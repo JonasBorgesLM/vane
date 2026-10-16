@@ -59,10 +59,13 @@ means observed on the Pi 5 (*Observations from the board*, below).
 | BDU | after one half of an output is read, that output is not updated until the other half is | p. 22 |
 | Reserved 0x34, 0x38, 0x39 in the calibration block | not described | board: the 16-byte read is clean and stable |
 
-`vanetest`'s model clears a data-ready bit only when both bytes of its output
-have been read, which is stricter than the chip (the high byte alone clears
-it). The driver always reads the whole output block, so the difference is never
-exercised.
+`vanetest`'s models clear a data-ready bit (and, on the LPS25H, its overrun bit)
+when the high byte of its output is read, as the datasheets say and the board
+showed: `HUMIDITY_OUT_H` alone took `STATUS_REG` from 0x03 to 0x01, `PRESS_OUT_H`
+alone from 0x03 to 0x01, and from 0x33 to 0x11 in continuous mode. They used to
+wait for every byte, which was stricter than the chip; the drivers always read
+the whole block, so no driver behaviour depended on it. The conformance suite
+now asserts both halves (low byte alone leaves it set, high byte clears it).
 
 ### Still to confirm for the HTS221
 

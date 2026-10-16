@@ -53,9 +53,6 @@ type LPS25HModel struct {
 	p vane.Hectopascal
 	t vane.Celsius
 
-	// readOut records which of the five output bytes were read since the last
-	// sample was latched: bits 0 to 2 pressure, bits 3 and 4 temperature.
-	readOut     uint8
 	converting  bool
 	presPending bool // staggered: the pressure half is still to finish
 	pending     int
@@ -120,7 +117,7 @@ func (m *LPS25HModel) powerOn() {
 		m.regs.Set(reg, 0)
 	}
 	m.regs.Set(lRegResConf, lResConfDefault)
-	m.converting, m.presPending, m.pending, m.readOut = false, false, 0, 0
+	m.converting, m.presPending, m.pending = false, false, 0
 }
 
 // Tx implements Device.
@@ -197,22 +194,17 @@ func (m *LPS25HModel) beforeRead(reg, n int) {
 	m.complete()
 }
 
-// afterRead clears a quantity's data-ready and overrun bits once all of its
-// output bytes have been read, in one transaction or several.
+// afterRead clears a quantity's data-ready and overrun bits when the high byte
+// of its output is read, whatever else the transaction reads: PRESS_OUT_H for
+// P_DA and P_OR, TEMP_OUT_H for T_DA and T_OR (LPS25H DocID023722 Rev 6 p. 31,
+// LPS25HB DocID027112 Rev 4 p. 41, and observed on the board).
 func (m *LPS25HModel) afterRead(reg, n int) {
-	for i := range 5 {
-		if r := lRegPressXL + i; r >= reg && r < reg+n {
-			m.readOut |= 1 << i
-		}
-	}
 	status := m.regs.Get(lRegStatus)
-	if m.readOut&0b00111 == 0b00111 {
+	if covers(reg, n, lRegPressXL+2) {
 		status &^= lStatusPDA | lStatusPOR
-		m.readOut &^= 0b00111
 	}
-	if m.readOut&0b11000 == 0b11000 {
+	if covers(reg, n, lRegTempL+1) {
 		status &^= lStatusTDA | lStatusTOR
-		m.readOut &^= 0b11000
 	}
 	m.regs.Set(lRegStatus, status)
 }
@@ -269,7 +261,6 @@ func (m *LPS25HModel) complete() {
 	}
 	setLE16(m.regs, lRegTempL, clampInt16((float64(m.t)-42.5)*480))
 	m.regs.Set(lRegStatus, status|lStatusTDA)
-	m.readOut = 0
 	if m.opts.staggered {
 		m.presPending = true
 		return

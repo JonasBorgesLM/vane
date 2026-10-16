@@ -36,3 +36,6 @@ func newModelOptions(opts []ModelOption) modelOptions {
 // that treats either data-ready bit as "the sample is ready" reads a humidity
 // that is not there yet.
 func WithStaggeredReady() ModelOption { return func(o *modelOptions) { o.staggered = true } }
+
+// covers reports whether a transaction reading n registers from reg includes r.
+func covers(reg, n, r int) bool { return r >= reg && r < reg+n }
