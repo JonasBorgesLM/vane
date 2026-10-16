@@ -509,11 +509,13 @@ package regio // register access for ST chips (G-13)
 // Dev owns a scratch buffer so reads allocate nothing (RNF-08): a buffer local
 // to a function escapes through the Bus interface (measured, 2 allocs/op).
 // Not safe for concurrent use; the driver's per-chip mutex covers it (ADR-0004).
-type Dev struct{ /* bus, addr, buf [2]byte */ }
-func New(b vane.Bus, addr uint16) *Dev
+type Dev struct{ /* bus, addr, increment scheme, buf [2]byte */ }
+// The increment scheme is fixed per device, never per call (ADR-0008):
+func New(b vane.Bus, addr uint16) *Dev                    // sub-address MSB: HTS221, LPS25H/HB, LSM9DS1 magnetometer
+func NewIncrementByRegister(b vane.Bus, addr uint16) *Dev // a register bit: LSM9DS1 accel/gyro (CTRL_REG8.IF_ADD_INC)
 func (d *Dev) Read(ctx context.Context, reg uint8) (uint8, error)
 func (d *Dev) Write(ctx context.Context, reg, val uint8) error
-func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error // sets 0x80; the only place that does
+func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error // sets 0x80 only under New; the only place that builds a block sub-address
 
 package poll // data-ready wait (RNF-05)
 type Clock interface { Now() time.Time; Sleep(ctx context.Context, d time.Duration) error }
