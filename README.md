@@ -205,6 +205,26 @@ The driver polls the status register every 5 ms (`WithPollInterval`), so these
 figures are the conversion time rounded up to that step plus the bus traffic,
 not the chip's conversion time alone.
 
+## The IMU and the bus speed
+
+`chip/lsm9ds1` reads the accelerometer, gyroscope and magnetometer, and with
+`WithFIFO` drains every sample of the chip's 32-sample FIFO through `ReadBatch`.
+Measured on the Pi 5 (detail in [`docs/hardware.md`](docs/hardware.md)):
+
+| Rate | 100 kHz bus (default) | 400 kHz bus |
+| --- | --- | --- |
+| 119 to 476 Hz, drained continuously | every sample | every sample |
+| 952 Hz, drained continuously | every sample | every sample |
+| 952 Hz, drained every 20 ms | an overrun before every batch | every sample |
+
+The FIFO holds 32 samples, 33.6 ms at 952 Hz, and a full drain takes about
+35 ms at 100 kHz and 9 ms at 400 kHz: a caller that pauses between drains must
+restart before the FIFO fills, counting the drain itself. `FlagOverrun` says
+when it did not. For 952 Hz with a pause between drains, add
+`dtparam=i2c_arm_baudrate=400000`
+to `/boot/firmware/config.txt` (a short line) and reboot. Every chip on the HAT
+was checked at 400 kHz. vane never sets the bus speed itself.
+
 ## Requirements
 
 Raspberry Pi 5 with a Sense HAT (v1 or v2), Raspberry Pi OS 64-bit, read/write
