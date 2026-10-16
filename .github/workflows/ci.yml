@@ -190,12 +190,26 @@ jobs:
           cache-dependency-path: go.mod
       - name: go test -fuzz, 20s per target
         run: |
+          set -o pipefail   # the step runs under bash -e only; the tee below must not hide go's status
           found=0
           for pkg in $(go list ./...); do
             for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
               found=1
               echo "::group::$pkg $target"
-              go test -run '^$' -fuzz "^${target}\$" -fuzztime 20s "$pkg"
+              # One retry, and only for a run that found nothing: the fuzz
+              # coordinator has reported its own -fuzztime expiry as "context
+              # deadline exceeded" and failed the job with no failing input
+              # (once in about 100 runs, #77; not reproduced locally in 30). A
+              # real finding always writes its input under testdata/fuzz and
+              # says "Failing input written to", so it is never retried.
+              if ! go test -run '^$' -fuzz "^${target}\$" -fuzztime 20s "$pkg" 2>&1 | tee "$RUNNER_TEMP/fuzz.log"; then
+                if grep -q 'context deadline exceeded' "$RUNNER_TEMP/fuzz.log" && ! grep -q 'Failing input written to' "$RUNNER_TEMP/fuzz.log"; then
+                  echo "::warning::$pkg $target: fuzz budget expiry reported as a failure with no failing input; retrying once"
+                  go test -run '^$' -fuzz "^${target}\$" -fuzztime 20s "$pkg"
+                else
+                  exit 1
+                fi
+              fi
               echo "::endgroup::"
             done
           done
