@@ -530,6 +530,45 @@ own conversion is left unread, which restarts the one-behind chain for that
 process. Only concurrent use reaches this; a process killed mid-read leaves a
 finished sample, which the next `New` drops.
 
+### The LSM9DS1 on the board (#51, step 0)
+
+Read-only, on 2026-10-16, with `vane-sense` loaded (no `1-001c` or `1-006a`
+node, so no kernel driver can own either address). Datasheet DocID025715 Rev 3
+(copy at `cdn.sparkfun.com/datasheets/IoT/LSM9DS1.pdf`). Nothing was written to
+the chip.
+
+```text
+--- accel/gyro 0x6A
+WHO_AM_I        0x0F: 0x68
+WHO_AM_I via MSB 0x8F: 0x00
+CTRL_REG8       0x22: 0x04          (reset value: IF_ADD_INC on)
+burst 4 from 0x0F:     0x68 0x00 0x00 0x00
+burst 4 from 0x8F:     0x00 0x00 0x00 0x00
+--- magnetometer 0x1C
+WHO_AM_I_M      0x0F: 0x3d
+CTRL_REG1_M..5_M one by one:    0x18 0x00 0x03 0x00 0x00
+burst 5 from 0x20 (no MSB):     0x18 0x00 0x03 0x00 0x00
+burst 5 from 0xA0 (MSB):        0x18 0x00 0x03 0x00 0x00
+OUT_X_L_M..OUT_Z_H_M one by one: 0x31 0x0f 0x57 0xf5 0xfe 0x07
+burst 6 from 0x28 (no MSB):     0x31 0x0f 0x57 0xf5 0xfe 0x07
+burst 6 from 0xA8 (MSB):        0x31 0x0f 0x57 0xf5 0xfe 0x07
+```
+
+| Fact | Value | Source |
+| --- | --- | --- |
+| Accel/gyro identity | `WHO_AM_I` (0x0F) = **0x68** at 0x6A | datasheet p. 45; board |
+| Magnetometer identity | `WHO_AM_I_M` (0x0F) = **0x3D** at 0x1C | datasheet p. 40; board |
+| Accel/gyro auto-increment | by `CTRL_REG8.IF_ADD_INC` (reset 1); the sub-address carries the address only | datasheet pp. 29, 53; board: a burst from 0x0F does not repeat `WHO_AM_I` |
+| **The sub-address MSB on the accel/gyro block** | **not ignored**: 0x8F does not read `WHO_AM_I`, it reads 0x00, and a burst from it reads zeros. A block read through `regio`'s MSB helper would return plausible zeros with no error | board |
+| Magnetometer auto-increment | the sub-address MSB, as on the HTS221 and LPS25H | datasheet p. 29 |
+| The MSB on the magnetometer | a burst increments **with or without** it: control and output bursts match the registers read one by one either way | board (the datasheet says the MSB enables it) |
+| Register state at power-on | not reliable: `CTRL_REG1_M` reads 0x18, its reset value is 0x10 (p. 40), and vane never wrote it. Something configured the chip earlier, and the Pi 5 keeps the HAT powered when halted | board |
+
+What this means for the driver (ADR-0008): the magnetometer goes through the
+existing block read; the accel/gyro block needs a block read that never sets
+the MSB, and `New` must configure every register it relies on rather than
+trust reset values.
+
 ### Still not settled by this board
 
 - **An image whose kernel ships `st_pressure_i2c`:** the stock conflict G-01
