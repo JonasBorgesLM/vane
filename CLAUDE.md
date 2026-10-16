@@ -3,7 +3,7 @@
 Guidance for Claude Code in this repository. The general engineering rules are
 in `~/.claude/CLAUDE.md`; this file carries only what is true of vane.
 
-**Status: v0.1.2 released.** The root package, `i2cdev`, both drivers,
+**Status: v0.2.0 released.** The root package, `i2cdev`, the three drivers,
 `sensehat`, `vanetest` and `cmd/vane-probe` exist, are tested and were checked
 on a Pi 5; what remains open is on the issue tracker. `REQUIREMENTS.md` and
 `docs/architecture.md` are the plan the code is checked against.
@@ -20,7 +20,7 @@ the beacon edge agent, through its own `SensorReader` port.
 - Compensating temperature for CPU heat, dew point, or any derived quantity.
 - Retry, circuit breaking, caching — the consumer's job (bastion, cistern).
 - Serialisation, transport, or any knowledge of beacon.
-- IMU, colour sensor, LED matrix, joystick — not in v0.1.
+- Colour sensor, LED matrix, joystick — not yet (the IMU is `chip/lsm9ds1`, v0.2).
 - Logging. vane has no logger and must not import crier or OpenTelemetry.
 
 ## Architecture
