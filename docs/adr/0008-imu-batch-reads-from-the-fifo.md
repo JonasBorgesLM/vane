@@ -1,7 +1,7 @@
 # ADR-0008: The LSM9DS1 is read in batches drained from its FIFO by the caller, through one driver for both of its addresses; vane starts no goroutine to stream it
 
 ## Status
-Proposed — 2026-10-16
+Accepted — 2026-10-16
 
 ## Context
 v0.3 adds the Sense HAT's IMU, the LSM9DS1 (#51). It is unlike the two chips
