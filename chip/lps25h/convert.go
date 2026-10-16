@@ -1,8 +1,9 @@
 package lps25h
 
-// Operating ranges used to flag a reading, from memory except the 1260 hPa
-// full scale (kernel st_pressure_core.c:386); see docs/hardware.md. A reading
-// outside them is kept as converted and flagged.
+// Operating ranges used to flag a reading, the same in both datasheets
+// (LPS25H DocID023722 and LPS25HB DocID027112, Table 3; see docs/hardware.md).
+// A reading outside them is kept as converted and flagged; the chip itself
+// clips pressure outside 260-1260 hPa, so a pressure at a bound may be clipped.
 //
 // There is no lower temperature bound on purpose. A 16-bit count at 480 per
 // degree around 42.5 degC cannot represent anything below -25.77 degC, so a
