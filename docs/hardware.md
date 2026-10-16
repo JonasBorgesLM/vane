@@ -564,6 +564,38 @@ burst 6 from 0xA8 (MSB):        0x31 0x0f 0x57 0xf5 0xfe 0x07
 | The MSB on the magnetometer | a burst increments **with or without** it: control and output bursts match the registers read one by one either way | board (the datasheet says the MSB enables it) |
 | Register state at power-on | not reliable: `CTRL_REG1_M` reads 0x18, its reset value is 0x10 (p. 40), and vane never wrote it. Something configured the chip earlier, and the Pi 5 keeps the HAT powered when halted | board |
 
+**Bursts and the FIFO** (for the `vanetest` model). These needed the sensors on,
+so `CTRL_REG1_G` and `CTRL_REG6_XL` were set to 119 Hz, `CTRL_REG9`/`FIFO_CTRL`
+for the FIFO, and every register written was put back to its value before
+(0x00), checked by reading it:
+
+```text
+OUT_G one by one:   0xa2 0xfd 0x8c 0x00 0x87 0x01
+OUT_XL one by one:  0x89 0xfe 0x7c 0x39 0xf2 0xe0
+burst 12 from 0x18: 0xaa 0xfd 0x89 0x00 0x8a 0x01 0x8e 0xfe 0x6e 0x39 0xfe 0xe0
+burst 24 from 0x18: (the same 12 bytes twice)
+burst 12 from 0x28: 0x8e 0xfe 0x6e 0x39 0xfe 0xe0 0xaa 0xfd 0x89 0x00 0x8a 0x01
+--- FIFO, Continuous mode (FMODE 110)
+FIFO_SRC after 0.5 s:        0x60      32 unread, OVRN
+after one 12-byte burst:     0x1f      31, OVRN cleared
+bypass (FIFO reset):         0x00
+restarted, 50 ms:            0x06
+after 6 bytes (gyro only):   0x06
+after the 6 accel bytes:     0x05
+FIFO_SRC 0x0b, one 36-byte burst: three distinct samples, then 0x09 (one more arrived meanwhile)
+--- FIFO mode (FMODE 001): 0x60 after 0.4 s and 0.3 s later: stops at 32 and reports OVRN
+```
+
+- A burst from `OUT_X_G` reads the gyroscope, then **jumps to `OUT_X_XL`**,
+  skipping `CTRL_REG4`..`STATUS_REG` (0x1E–0x27; `CTRL_REG4` reads 0x38, so a
+  contiguous read would have shown it), and wraps back to `OUT_X_G` after
+  `OUT_Z_XL`. From `OUT_X_XL` it wraps to `OUT_X_G`. Outside the FIFO a longer
+  burst re-reads the same sample.
+- In the FIFO, **a sample leaves when its accelerometer bytes are read**, not
+  its gyroscope bytes; taking one out clears `OVRN`; one burst takes out as many
+  samples as it covers.
+- FIFO mode (stop when full) also reports `OVRN` at 32.
+
 What this means for the driver (ADR-0008): the magnetometer goes through the
 existing block read; the accel/gyro block needs a block read that never sets
 the MSB, and `New` must configure every register it relies on rather than
