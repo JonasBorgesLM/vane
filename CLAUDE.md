@@ -30,6 +30,7 @@ import cycle on the first `go build`):
 
 ```
 sensehat ──▶ chip/hts221, chip/lps25h ──▶ vane (leaf) ◀── i2cdev, vanetest
+             chip/lsm9ds1 (not in sensehat yet, ADR-0008) ──▶ vane
                          └──────▶ internal/*
 ```
 
