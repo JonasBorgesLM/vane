@@ -723,6 +723,49 @@ any write, `CTRL_REG8` = 0x44 before any block read, the bare sub-address
 (`W 18`) on 0x6A and the MSB on 0x1C, and in the batch one the turn-on samples
 dropped: 11 held after 100 ms, all dropped, then 2 more dropped and 11 returned.
 
+### The TCS3400 on the board (#52, step 0)
+
+Datasheet **TCS3400 v2-00, 2023-Feb-09** (ams OSRAM, DS000411; copy at
+`farnell.com/datasheets/4327684.pdf`). No kernel node or driver at 0x39 or 0x29.
+Read-only first:
+
+```text
+0x29 ID: Error: Sending messages failed: Remote I/O error
+0x39 ID 0x92: 0x90   REVID 0x91: 0x61
+one by one 0x80..0x83: 0x00 0xff 0x00 0xff        burst 4 from 0x80: 0x00 0xff 0x00 0xff
+one by one 0x8C..0x93: 0x00 0x40 0x00 0x00 0x00 0x61 0x90 0x04
+burst 8 from 0x8C:     0x00 0x40 0x00 0x00 0x00 0x61 0x90 0x04
+sub-address 0x12 (bit 7 clear): 0x24
+```
+
+| Fact | Value | Source |
+| --- | --- | --- |
+| Part on this board | **TCS34001**: address 0x39 and `ID` 0x90 (ID 7:2 = 100100, VID 1:0 = 00) | datasheet pp. 20, 29 (ordering table: 0x39 for TCS34001/3, 0x29 for TCS34005/7; VID 00 for 01/05, 11 for 03/07); board |
+| 0x29 | no device (NACK) | board |
+| Register addresses | 0x80–0xFF; **bit 7 is part of the address**, not an increment request; 0x12 reads 0x24, outside the map | datasheet register map p. 13; board |
+| Auto-increment | always: bursts match single reads, with no bit to set | board (the datasheet does not describe it) |
+| RGBC data | 0x94–0x9B, 16-bit little-endian C, R, G, B; reading the low byte latches the high byte in a shadow register | p. 21 |
+| Integration | `ATIME` 0x81: cycles = 256 − ATIME, 2.78 ms each; max count = min(cycles × 1024, 65535) | p. 15 |
+| Gain | `CONTROL` 0x8F `AGAIN` 1:0: 1×, 4×, 16×, 64× | p. 18 |
+
+Then, writing `ENABLE`, `ATIME` and `CONTROL` and restoring them to their reset
+values (0x00, 0xFF, 0x00), checked by reading:
+
+```text
+ATIME 0xF6 (27.8 ms), 1x:  PON only STATUS=0x04; AEN set 0x00; 15 ms 0x04; 35 ms 0x15 (AVALID)
+                           AEN cleared 0x14; AEN set again 0x14; 40 ms 0x15     data all 0x00
+ATIME 0xC0 (178 ms), 64x:  data 0x78 0x00 0x39 0x00 0x42 0x00 0x3c 0x00          C=120 R=57 G=66 B=60
+the same, LED matrix white: data 0x8f 0x0c 0xe0 0x02 0xb7 0x05 0x80 0x05         C=3215 R=736 G=1463 B=1408
+```
+
+- **`AVALID` is cleared by turning `AEN` off and stays clear when it is turned on
+  again until a cycle completes**: one integration cycle per `AEN`, which is what
+  a one-shot read needs.
+- There is no per-cycle data-ready bit beyond that: with `AEN` left on, nothing
+  says whether the sample is newer than the last read.
+- The sensor sits under the HAT and sees little ambient light (C = 120 at the
+  highest gain and 178 ms); it sees the LED matrix.
+
 ### Still not settled by this board
 
 - **An image whose kernel ships `st_pressure_i2c`:** the stock conflict G-01
