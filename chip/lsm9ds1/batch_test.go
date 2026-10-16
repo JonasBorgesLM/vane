@@ -23,6 +23,20 @@ func fill(r *rig, base int16, n int) {
 
 func gyroX(m lsm9ds1.Motion) int32 { return m.AngularRate.X.Raw }
 
+// turnOn119 is the turn-on sample count at the default 119 Hz, from
+// DocID025715 Rev 3 Table 12 (LPF1 and LPF2), repeated here.
+const turnOn119 = 13
+
+// spendTurnOn fills and drains the turn-on samples, so a test starts with a
+// FIFO whose next sample is returned.
+func spendTurnOn(t *testing.T, r *rig, s *lsm9ds1.Sensor) {
+	t.Helper()
+	fill(r, -1, turnOn119)
+	if n, err := s.ReadBatch(bg, make([]lsm9ds1.Motion, 32)); n != 0 || err != nil {
+		t.Fatalf("the turn-on samples: n=%d err=%v, want all %d dropped", n, err, turnOn119)
+	}
+}
+
 func TestEachModeRefusesTheOtherMethod(t *testing.T) {
 	r := newRig(t, nil, nil)
 	s := newSensor(t, r)
@@ -56,39 +70,51 @@ func TestWithFIFOConfiguresContinuousMode(t *testing.T) {
 	}
 }
 
-// The first sample after entering FIFO mode is dropped (DocID025715 Rev 3
-// p. 23); the rest come oldest first. Negative control: without the discard the
-// first sample returned is 100, not 101.
-func TestReadBatchDropsTheFirstSampleThenReturnsOldestFirst(t *testing.T) {
+// The chip's turn-on samples after New are dropped (Table 12: 13 at 119 Hz,
+// 18 at 952 Hz; on the board up to 17 were wrong at 952 Hz); the rest come
+// oldest first. Negative control: dropping one sample, as the first version
+// did, returns 100 instead of 113.
+func TestReadBatchDropsTheTurnOnSamplesThenReturnsOldestFirst(t *testing.T) {
 	r := newRig(t, nil, nil)
 	s := newSensor(t, r, lsm9ds1.WithFIFO())
-	fill(r, 100, 5)
-	dst := make([]lsm9ds1.Motion, 10)
+	fill(r, 100, turnOn119+4)
+	dst := make([]lsm9ds1.Motion, 32)
 	n, err := s.ReadBatch(bg, dst)
 	if err != nil || n != 4 {
-		t.Fatalf("n=%d err=%v, want 4 (five held, the first dropped)", n, err)
+		t.Fatalf("n=%d err=%v, want 4 (%d held, %d dropped)", n, err, turnOn119+4, turnOn119)
 	}
 	for i := range n {
-		if got := gyroX(dst[i]); got != int32(101+i) {
-			t.Errorf("sample %d: gyro X raw %d, want %d", i, got, 101+i)
+		if got := gyroX(dst[i]); got != int32(100+turnOn119+i) {
+			t.Errorf("sample %d: gyro X raw %d, want %d", i, got, 100+turnOn119+i)
 		}
-		if got := dst[i].Acceleration.X.Raw; got != -int32(101+i) {
-			t.Errorf("sample %d: accel X raw %d, want %d", i, got, -(101 + i))
+		if got := dst[i].Acceleration.X.Raw; got != -int32(100+turnOn119+i) {
+			t.Errorf("sample %d: accel X raw %d, want %d", i, got, -(100 + turnOn119 + i))
 		}
 	}
 	fill(r, 200, 3)
 	if n, err := s.ReadBatch(bg, dst); err != nil || n != 3 || gyroX(dst[0]) != 200 {
-		t.Fatalf("second batch: n=%d err=%v first=%d, want 3 from 200: only the first batch drops one", n, err, gyroX(dst[0]))
+		t.Fatalf("second batch: n=%d err=%v first=%d, want 3 from 200: only the first samples are dropped", n, err, gyroX(dst[0]))
+	}
+}
+
+func TestTheTurnOnCountFollowsTheRate(t *testing.T) {
+	for rate, want := range map[lsm9ds1.Rate]int{lsm9ds1.Rate14Hz9: 2, lsm9ds1.Rate59Hz5: 13, lsm9ds1.Rate119Hz: 13, lsm9ds1.Rate238Hz: 14, lsm9ds1.Rate476Hz: 15, lsm9ds1.Rate952Hz: 18} {
+		r := newRig(t, nil, nil)
+		s := newSensor(t, r, lsm9ds1.WithFIFO(), lsm9ds1.WithRate(rate))
+		fill(r, 0, 30)
+		if n, _ := s.ReadBatch(bg, make([]lsm9ds1.Motion, 32)); n != 30-want {
+			t.Errorf("rate %d: %d returned of 30, want %d (%d dropped)", rate, n, 30-want, want)
+		}
 	}
 }
 
 func TestReadBatchTakesNoMoreThanDstHolds(t *testing.T) {
 	r := newRig(t, nil, nil)
 	s := newSensor(t, r, lsm9ds1.WithFIFO())
-	fill(r, 0, 11) // ten after the discard
+	fill(r, 0, turnOn119+10)
 	dst := make([]lsm9ds1.Motion, 4)
-	if n, err := s.ReadBatch(bg, dst); err != nil || n != 4 || gyroX(dst[3]) != 4 {
-		t.Fatalf("n=%d err=%v last=%d, want 4 ending at 4", n, err, gyroX(dst[3]))
+	if n, err := s.ReadBatch(bg, dst); err != nil || n != 4 || gyroX(dst[3]) != turnOn119+3 {
+		t.Fatalf("n=%d err=%v last=%d, want 4 ending at %d", n, err, gyroX(dst[3]), turnOn119+3)
 	}
 	if got := r.ag.Buffered(); got != 6 {
 		t.Errorf("%d left in the FIFO, want 6", got)
@@ -102,8 +128,7 @@ func TestReadBatchTakesNoMoreThanDstHolds(t *testing.T) {
 func TestReadBatchDrainsAFullFIFO(t *testing.T) {
 	r := newRig(t, nil, nil)
 	s := newSensor(t, r, lsm9ds1.WithFIFO())
-	fill(r, 0, 1)
-	_, _ = s.ReadBatch(bg, make([]lsm9ds1.Motion, 1)) // spend the discard
+	spendTurnOn(t, r, s)
 	fill(r, 1000, 32)
 	dst := make([]lsm9ds1.Motion, 40)
 	n, err := s.ReadBatch(bg, dst)
@@ -123,11 +148,12 @@ func TestReadBatchDrainsAFullFIFO(t *testing.T) {
 func TestReadBatchFlagsTheFirstSampleAfterAnOverrun(t *testing.T) {
 	r := newRig(t, nil, nil)
 	s := newSensor(t, r, lsm9ds1.WithFIFO())
+	spendTurnOn(t, r, s)
 	fill(r, 0, 40) // eight overwritten
 	dst := make([]lsm9ds1.Motion, 40)
 	n, err := s.ReadBatch(bg, dst)
-	if err != nil || n != 31 {
-		t.Fatalf("n=%d err=%v, want 31 (32 held, one dropped)", n, err)
+	if err != nil || n != 32 {
+		t.Fatalf("n=%d err=%v, want 32", n, err)
 	}
 	if !dst[0].AngularRate.X.Flags.Has(vane.FlagOverrun) || !dst[0].Acceleration.Z.Flags.Has(vane.FlagOverrun) {
 		t.Errorf("first sample flags %v, want FlagOverrun", dst[0].AngularRate.X.Flags)
@@ -144,7 +170,8 @@ func TestReadBatchFlagsTheFirstSampleAfterAnOverrun(t *testing.T) {
 func TestReadBatchStampsSamplesOnePeriodApart(t *testing.T) {
 	r := newRig(t, nil, nil)
 	s := newSensor(t, r, lsm9ds1.WithFIFO(), lsm9ds1.WithRate(lsm9ds1.Rate119Hz))
-	fill(r, 0, 4)
+	spendTurnOn(t, r, s)
+	fill(r, 0, 3)
 	dst := make([]lsm9ds1.Motion, 4)
 	n, _ := s.ReadBatch(bg, dst)
 	second := float64(time.Second)
@@ -173,6 +200,10 @@ func TestReadBatchStopsWhenTheContextEnds(t *testing.T) {
 func TestReadBatchDoesNotAllocate(t *testing.T) {
 	b := directBus{vanetest.NewLSM9DS1AccelGyro(), vanetest.NewLSM9DS1Magnetometer()}
 	s, err := lsm9ds1.New(bg, b, lsm9ds1.WithFIFO())
+	for range turnOn119 {
+		b.ag.Tick()
+	}
+	_, _ = s.ReadBatch(bg, make([]lsm9ds1.Motion, 32))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -37,6 +37,16 @@ func defaultConfig() config {
 // ODR_G code.
 type Rate uint8
 
+// turnOn is how many samples the chip produces before its output can be used,
+// after New powers it up: the larger of DocID025715 Rev 3 Table 11
+// (accelerometer, up to 14 at 952 Hz) and Table 12 (gyroscope, the LPF1 and
+// LPF2 column). On the board, up to 17 samples at 952 Hz and 8 at 476 Hz after
+// New were wrong, the gyroscope saturated at ±32768 (docs/hardware.md); the
+// LPF1-only column (8 and 5) would not have covered them.
+func (r Rate) turnOn() int {
+	return [...]int{0, 2, 13, 13, 14, 15, 18}[r]
+}
+
 // period is the time between two samples at the rate.
 func (r Rate) period() time.Duration {
 	hz := [...]float64{0, 14.9, 59.5, 119, 238, 476, 952}[r]

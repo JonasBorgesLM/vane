@@ -41,9 +41,12 @@ type Sensor struct {
 	magErr error // likewise for the magnetometer
 	out    [batchSamples * agSampleLen]byte
 	closed bool
-	// discard: the first sample after entering FIFO mode is not to be used
-	// (DocID025715 Rev 3 p. 23).
-	discard bool
+	// discard is how many FIFO samples ReadBatch still drops: the chip's
+	// turn-on samples after New (Rate.turnOn), which also covers the first
+	// sample after entering FIFO mode (p. 23).
+	discard int
+	// settled is when Read's latest sample is past the turn-on samples.
+	settled time.Time
 }
 
 // opRead names the operation in a read's errors.
@@ -117,7 +120,6 @@ func (s *Sensor) configureAccelGyro(ctx context.Context) error {
 	ctrl9, fifoCtrl := uint8(0), uint8(0)
 	if s.cfg.fifo {
 		ctrl9, fifoCtrl = agFIFOEn, agFIFOCont
-		s.discard = true
 	}
 	for _, w := range [...]struct{ reg, val uint8 }{
 		{agCtrl8, agCtrl8Value},
@@ -131,6 +133,9 @@ func (s *Sensor) configureAccelGyro(ctx context.Context) error {
 			return fail(s.agSrc, "configure", w.reg, err)
 		}
 	}
+	n := s.cfg.rate.turnOn()
+	s.discard = n
+	s.settled = s.cfg.now().Add(time.Duration(n) * s.cfg.rate.period())
 	return nil
 }
 
@@ -150,6 +155,11 @@ func (s *Sensor) configureMagnetometer(ctx context.Context) error {
 
 // Read returns the latest accelerometer and gyroscope sample. A quantity with no
 // sample newer than the previous Read is flagged vane.FlagStale.
+//
+// For the chip's turn-on samples after New, 2 to 18 sample periods depending
+// on the rate (13 at 119 Hz, about 110 ms), Read returns vane.ErrNotReady:
+// those samples are wrong without looking wrong. Read does not wait; the caller
+// tries again.
 func (s *Sensor) Read(ctx context.Context) (Motion, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -158,6 +168,11 @@ func (s *Sensor) Read(ctx context.Context) (Motion, error) {
 	}
 	if s.cfg.fifo {
 		return Motion{}, &vane.SensorError{Source: s.agSrc, Op: opRead, Err: ErrWrongMode}
+	}
+	if s.cfg.now().Before(s.settled) {
+		// The latest sample is still one of the turn-on samples, wrong without
+		// looking wrong except for a saturated gyroscope (Rate.turnOn).
+		return Motion{}, &vane.SensorError{Source: s.agSrc, Op: opRead, Err: vane.ErrNotReady}
 	}
 	st, err := s.ag.Read(ctx, agStatus)
 	if err != nil {
@@ -217,12 +232,13 @@ func (s *Sensor) ReadBatch(ctx context.Context, dst []Motion) (int, error) {
 	if held > agFIFODepth {
 		held = agFIFODepth
 	}
-	if s.discard && held > 0 {
-		if err := s.ag.ReadBlock(ctx, agOut, s.out[:agSampleLen]); err != nil {
+	for s.discard > 0 && held > 0 {
+		n := min(s.discard, held, batchSamples)
+		if err := s.ag.ReadBlock(ctx, agOut, s.out[:n*agSampleLen]); err != nil {
 			return 0, fail(s.agSrc, opRead, agOut, err)
 		}
-		s.discard = false
-		held--
+		s.discard -= n
+		held -= n
 	}
 	k := min(held, len(dst))
 	period := s.cfg.rate.period()

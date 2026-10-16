@@ -633,12 +633,52 @@ slice every `every`, 25 times, on `i2c-1` at the default 100 kHz:
 952.0 Hz, drained every 20ms: 786 samples in 1.40 s = 562/s (expected ~952), overruns 24, |a| 0.866..1.646 g
 ```
 
-At 119 Hz every sample arrives. At 952 Hz **the bus is the limit, as ADR-0008
-expected**: a full drain is 384 bytes, about 35 ms at 100 kHz, longer than the
-33.6 ms the FIFO takes to fill, so every batch follows an overrun. The spread
-of |a| at 952 Hz (0.87–1.65 g, against 0.96–1.02 g at 119 Hz) is not explained
-yet: the wider bandwidth with the Pi's fan running, or a read disturbed by the
-overruns. Both questions are step 6, with the bus at 400 kHz.
+At 119 Hz every sample arrives. At 952 Hz every batch followed an overrun, and
+|a| spread to 0.87–1.65 g. **Both first readings were wrong; step 6 below has
+the causes**: the overruns came from sleeping 20 ms between drains on top of a
+35 ms drain, not from the bus, and the spread was the chip's turn-on samples.
+
+### Turn-on samples, and the bus at 100 kHz (#51, step 6)
+
+Draining as fast as the bus allows (no sleep while a batch is 8 samples or
+more), 3 s per rate, 100 kHz, the v0.1 code of step 5:
+
+```text
+  119 Hz:    116 samples/s (97%), overruns 0, slowest ReadBatch 1.9ms,  |a| p1 1.011 p50 1.014 p99 1.020 max 1.021 g
+  238 Hz:    231 samples/s (97%), overruns 0, slowest ReadBatch 1.9ms,  |a| p1 1.012 p50 1.014 p99 1.016 max 2.365 g
+  476 Hz:    463 samples/s (97%), overruns 0, slowest ReadBatch 4ms,    |a| p1 1.011 p50 1.013 p99 1.015 max 1.647 g
+  952 Hz:    874 samples/s (92%), overruns 0, slowest ReadBatch 36.5ms, |a| p1 1.011 p50 1.014 p99 1.016 max 1.018 g
+```
+
+**The 100 kHz bus keeps up at 952 Hz** when the caller drains continuously. The
+outliers were single samples (p99 stays at 1.016 g), and printing where they
+fall put every one of them at the start of a run, with the gyroscope saturated:
+
+```text
+rate code 4 run 1: #0 |a|=1.447, #1 |a|=2.354 raw a(-9899,17842,-32764) g(-32511,32302,32414), #2 ...
+rate code 5 run 2: #2..#7, g(32763,-32768,-32768)
+rate code 6 run 0: #5..#16 |a| 0.85..1.63, g(32763,-32768,-32768)
+```
+
+These are the **turn-on samples** of DocID025715 Rev 3 Table 11 (accelerometer)
+and Table 12 (gyroscope): samples to discard after power-up. Up to 17 were wrong
+at 952 Hz and 8 at 476 Hz, more than Table 12's LPF1-only column (8, 5), within
+its LPF1-and-LPF2 column (18, 15). The driver dropped one. It now drops the
+larger column's count in `ReadBatch` (2, 13, 13, 14, 15, 18 for 14.9 to 952 Hz),
+and `Read` returns `vane.ErrNotReady` for that many periods after `New`. After
+the fix, 12 runs (3 per rate) found no outlier, and:
+
+```text
+  119 Hz:    112 samples/s (94%), overruns 0, |a| p1 1.010 p50 1.011 p99 1.013 max 1.013 g
+  238 Hz:    227 samples/s (95%), overruns 0, |a| p1 1.011 p50 1.013 p99 1.014 max 1.015 g
+  476 Hz:    459 samples/s (96%), overruns 0, |a| p1 1.011 p50 1.013 p99 1.016 max 1.017 g
+  952 Hz:    868 samples/s (91%), overruns 0, |a| p1 1.011 p50 1.014 p99 1.017 max 1.018 g
+```
+
+The shortfall from 100% is the dropped samples and the start of each 3 s run.
+At 952 Hz the slowest `ReadBatch` is 36 ms, a full FIFO; a caller that drains
+less often than every 33 ms at that rate loses samples, and is told so by
+`FlagOverrun`.
 
 ### Still not settled by this board
 
