@@ -21,8 +21,9 @@ type config struct {
 }
 
 // Defaults for waiting on a one-shot conversion. The timeout is a deliberate
-// over-estimate: the datasheet's conversion times are not confirmed yet (see
-// docs/hardware.md), and it only decides how long a failure takes to report.
+// over-estimate: the datasheet gives no conversion times, and on a Pi 5 they
+// run from about 7 ms at the default averaging to 51 ms at the most (docs/hardware.md). It only decides how long a failure takes
+// to report.
 const (
 	defaultPollInterval = 5 * time.Millisecond
 	defaultReadyTimeout = time.Second

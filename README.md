@@ -188,14 +188,18 @@ How long one one-shot `Read` takes, trigger to converted sample, measured on
 a Raspberry Pi 5 with a Sense HAT v2 (median of 20 reads, `TestHardwareLatency`;
 detail in [`docs/hardware.md`](docs/hardware.md)):
 
-| Chip | Averaging (humidity/temperature samples) | Median |
+| Chip | Averaging (samples per quantity) | Median |
 | --- | --- | --- |
 | HTS221 | 4/2, 8/4, 16/8, **32/16 (default)** | 7.0 ms |
 | HTS221 | 64/32 | 12.5 ms |
 | HTS221 | 128/64 | 18.1 ms |
 | HTS221 | 256/128 | 29.2 ms |
 | HTS221 | 512/256 | 51.3 ms |
-| LPS25H | chip default (no averaging option yet) | 40.3 ms |
+| LPS25H | 8/8, 32/8, 8/64 (pressure/temperature) | 7.1 ms |
+| LPS25H | 128/8, 32/64 | 12.6 ms |
+| LPS25H | 128/64 | 18.2 ms |
+| LPS25H | 512/8 | 34.8 ms |
+| LPS25H | **512/64 (the LPS25HB's reset value)** | 40.4 ms |
 
 The driver polls the status register every 5 ms (`WithPollInterval`), so these
 figures are the conversion time rounded up to that step plus the bus traffic,

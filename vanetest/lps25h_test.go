@@ -338,8 +338,14 @@ func TestLPS25HWritableSet(t *testing.T) {
 	if err := l.write(0x21, 0); err != nil {
 		t.Errorf("CTRL_REG2: %v", err)
 	}
+	if err := l.write(0x10, 0x0F); err != nil {
+		t.Errorf("RES_CONF: %v", err)
+	}
+	if err := l.write(0x10, 0x10); !errors.Is(err, vanetest.ErrProtocol) {
+		t.Errorf("RES_CONF with a reserved bit: error = %v, want a protocol violation", err)
+	}
 	// Writable on the chip, but vane has no reason to write them.
-	for _, reg := range []uint8{0x08, 0x10, 0x22, 0x23, 0x24, 0x2E, 0x30, 0x39, 0x0F, 0x27, 0x28} {
+	for _, reg := range []uint8{0x08, 0x22, 0x23, 0x24, 0x2E, 0x30, 0x39, 0x0F, 0x27, 0x28} {
 		if err := l.write(reg, 0); !errors.Is(err, vanetest.ErrProtocol) {
 			t.Errorf("write to 0x%02x: error = %v, want a protocol violation", reg, err)
 		}
