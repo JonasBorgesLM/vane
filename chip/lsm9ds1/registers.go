@@ -19,12 +19,19 @@ const (
 	agStatus      = 0x27 // GDA 1, XLDA 0
 	agOut         = 0x18 // OUT_X_G; a 12-byte burst continues at OUT_X_XL (board)
 	agFIFOCtrl    = 0x2E
+	agFIFOSrc     = 0x2F // FTH 7, OVRN 6, FSS 5:0
 
 	// CTRL_REG8: BDU and IF_ADD_INC, nothing else (interrupts active high,
 	// push-pull, 4-wire SPI, little-endian).
 	agCtrl8Value = 1<<6 | 1<<2
 	agStatusXLDA = 1 << 0
 	agStatusGDA  = 1 << 1
+	agFIFOEn     = 1 << 1 // CTRL_REG9
+	agFIFOCont   = 6 << 5 // FIFO_CTRL FMODE: Continuous, the oldest overwritten when full
+	agFIFOOVRN   = 1 << 6
+	agFIFOFSS    = 0x3F
+	agFIFODepth  = 32
+	agSampleLen  = 12 // OUT_X_G..OUT_Z_G then OUT_X_XL..OUT_Z_XL
 
 	magWhoAmIValue = 0x3D
 	magCtrl1       = 0x20 // TEMP_COMP 7, OM 6:5, DO 4:2

@@ -17,7 +17,8 @@ with no section here.
   accelerometer/gyroscope (0x6A) and the magnetometer (0x1C) separately and
   keeps either working if the other fails; `Read` returns acceleration and
   angular rate, `ReadMagnetic` the magnetic field, in g, dps and gauss, with
-  rate and full-scale options. Batch reads from the FIFO are not in yet.
+  rate and full-scale options. `WithFIFO` and `ReadBatch` drain the chip's
+  32-sample FIFO, every sample oldest first, with overruns flagged.
 - `vane`: `StandardGravity`, `DegreesPerSecond`, `Gauss` and `ChipLSM9DS1`.
 - `internal/regio`: a second auto-increment scheme for devices that increment
   by a register bit (#104).

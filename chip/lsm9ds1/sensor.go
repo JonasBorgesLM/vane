@@ -11,6 +11,11 @@ import (
 	"github.com/JonasBorgesLM/vane/internal/regio"
 )
 
+// ErrWrongMode is returned by Read on a Sensor made WithFIFO, and by ReadBatch
+// on one made without it: the FIFO holds the oldest samples and Read wants the
+// latest, so a Sensor is in one mode or the other from New on.
+var ErrWrongMode = errors.New("lsm9ds1: the method does not match the FIFO mode chosen in New")
+
 // Vector3 is one three-axis reading. Each axis is a full measurement, with its
 // raw count, source, time and flags; the three share a Time.
 type Vector3[T ~float64] struct {
@@ -34,9 +39,19 @@ type Sensor struct {
 	mu     sync.Mutex
 	agErr  error // why the accelerometer and gyroscope are unusable; nil when they work
 	magErr error // likewise for the magnetometer
-	out    [12]byte
+	out    [batchSamples * agSampleLen]byte
 	closed bool
+	// discard: the first sample after entering FIFO mode is not to be used
+	// (DocID025715 Rev 3 p. 23).
+	discard bool
 }
+
+// opRead names the operation in a read's errors.
+const opRead = "read"
+
+// batchSamples is how many FIFO samples one transaction reads: a bounded
+// burst, so a long drain still checks the context between transactions.
+const batchSamples = 8
 
 // New identifies both devices, then configures each one that identified. A
 // device is written to only after its own identity register has been read and
@@ -96,10 +111,19 @@ func fail(src vane.Source, op string, reg uint8, err error) error {
 func (s *Sensor) configureAccelGyro(ctx context.Context) error {
 	ctrl6 := uint8(s.cfg.rate)<<5 | accelScales[s.cfg.accel].code<<3
 	ctrl1 := uint8(s.cfg.rate)<<5 | gyroScales[s.cfg.gyro].code<<3
+	// Bypass for Read, which wants the latest sample; Continuous for ReadBatch.
+	// Bypass is written first either way, which empties a FIFO someone else
+	// left full.
+	ctrl9, fifoCtrl := uint8(0), uint8(0)
+	if s.cfg.fifo {
+		ctrl9, fifoCtrl = agFIFOEn, agFIFOCont
+		s.discard = true
+	}
 	for _, w := range [...]struct{ reg, val uint8 }{
 		{agCtrl8, agCtrl8Value},
-		{agFIFOCtrl, 0}, // Bypass: Read wants the latest sample, not the oldest
-		{agCtrl9, 0},
+		{agFIFOCtrl, 0},
+		{agCtrl9, ctrl9},
+		{agFIFOCtrl, fifoCtrl},
 		{agCtrl6XL, ctrl6},
 		{agCtrl1G, ctrl1},
 	} {
@@ -132,13 +156,16 @@ func (s *Sensor) Read(ctx context.Context) (Motion, error) {
 	if err := s.usable(s.agSrc, s.agErr); err != nil {
 		return Motion{}, err
 	}
+	if s.cfg.fifo {
+		return Motion{}, &vane.SensorError{Source: s.agSrc, Op: opRead, Err: ErrWrongMode}
+	}
 	st, err := s.ag.Read(ctx, agStatus)
 	if err != nil {
-		return Motion{}, fail(s.agSrc, "read", agStatus, err)
+		return Motion{}, fail(s.agSrc, opRead, agStatus, err)
 	}
 	now := s.cfg.now()
 	if err := s.ag.ReadBlock(ctx, agOut, s.out[:12]); err != nil {
-		return Motion{}, fail(s.agSrc, "read", agOut, err)
+		return Motion{}, fail(s.agSrc, opRead, agOut, err)
 	}
 	var gFlags, xlFlags vane.Flag
 	if st&agStatusGDA == 0 {
@@ -147,10 +174,79 @@ func (s *Sensor) Read(ctx context.Context) (Motion, error) {
 	if st&agStatusXLDA == 0 {
 		xlFlags |= vane.FlagStale
 	}
+	return s.motion(s.out[:agSampleLen], now, gFlags, xlFlags), nil
+}
+
+func (s *Sensor) motion(b []byte, at time.Time, gFlags, xlFlags vane.Flag) Motion {
 	return Motion{
-		AngularRate:  vector[vane.DegreesPerSecond](s.out[0:6], gyroScales[s.cfg.gyro].per, s.agSrc, now, gFlags),
-		Acceleration: vector[vane.StandardGravity](s.out[6:12], accelScales[s.cfg.accel].per, s.agSrc, now, xlFlags),
-	}, nil
+		AngularRate:  vector[vane.DegreesPerSecond](b[0:6], gyroScales[s.cfg.gyro].per, s.agSrc, at, gFlags),
+		Acceleration: vector[vane.StandardGravity](b[6:12], accelScales[s.cfg.accel].per, s.agSrc, at, xlFlags),
+	}
+}
+
+// ReadBatch moves the samples the FIFO holds into dst, oldest first, up to
+// len(dst), and returns how many. It needs a Sensor made WithFIFO.
+//
+// The chip keeps 32 samples; at the rate set with WithRate it fills in
+// 32 / rate seconds (34 ms at 952 Hz), and a full FIFO overwrites its oldest
+// sample. When that has happened since the previous call, the first sample
+// returned is flagged vane.FlagOverrun: samples were lost before it. vane does
+// not drain the FIFO on its own; the caller's loop sets the pace (ADR-0008).
+//
+// Each sample is stamped one rate period after the one before it, the last at
+// the time the FIFO's count was read: the chip records no time, so the stamps
+// are as accurate as the rate and that read.
+func (s *Sensor) ReadBatch(ctx context.Context, dst []Motion) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.usable(s.agSrc, s.agErr); err != nil {
+		return 0, err
+	}
+	if !s.cfg.fifo {
+		return 0, &vane.SensorError{Source: s.agSrc, Op: opRead, Err: ErrWrongMode}
+	}
+	if len(dst) == 0 {
+		return 0, nil
+	}
+	src, err := s.ag.Read(ctx, agFIFOSrc)
+	if err != nil {
+		return 0, fail(s.agSrc, opRead, agFIFOSrc, err)
+	}
+	now := s.cfg.now()
+	held := int(src & agFIFOFSS)
+	if held > agFIFODepth {
+		held = agFIFODepth
+	}
+	if s.discard && held > 0 {
+		if err := s.ag.ReadBlock(ctx, agOut, s.out[:agSampleLen]); err != nil {
+			return 0, fail(s.agSrc, opRead, agOut, err)
+		}
+		s.discard = false
+		held--
+	}
+	k := min(held, len(dst))
+	period := s.cfg.rate.period()
+	overrun := src&agFIFOOVRN != 0
+	for done := 0; done < k; {
+		n := min(k-done, batchSamples)
+		buf := s.out[:n*agSampleLen]
+		// One burst of whole samples: with the gyroscope on, the chip's output
+		// pointer wraps from OUT_Z_XL to OUT_X_G, and reading a sample's
+		// accelerometer bytes takes it out of the FIFO (docs/hardware.md).
+		if err := s.ag.ReadBlock(ctx, agOut, buf); err != nil {
+			return done, fail(s.agSrc, opRead, agOut, err)
+		}
+		for i := range n {
+			at := now.Add(-time.Duration(held-1-(done+i)) * period)
+			var flags vane.Flag
+			if overrun && done+i == 0 {
+				flags = vane.FlagOverrun
+			}
+			dst[done+i] = s.motion(buf[i*agSampleLen:(i+1)*agSampleLen], at, flags, flags)
+		}
+		done += n
+	}
+	return k, nil
 }
 
 // ReadMagnetic returns the latest magnetometer sample. It is flagged
@@ -164,11 +260,11 @@ func (s *Sensor) ReadMagnetic(ctx context.Context) (Vector3[vane.Gauss], error) 
 	}
 	st, err := s.mag.Read(ctx, magStatus)
 	if err != nil {
-		return Vector3[vane.Gauss]{}, fail(s.magSrc, "read", magStatus, err)
+		return Vector3[vane.Gauss]{}, fail(s.magSrc, opRead, magStatus, err)
 	}
 	now := s.cfg.now()
 	if err := s.mag.ReadBlock(ctx, magOut, s.out[:6]); err != nil {
-		return Vector3[vane.Gauss]{}, fail(s.magSrc, "read", magOut, err)
+		return Vector3[vane.Gauss]{}, fail(s.magSrc, opRead, magOut, err)
 	}
 	var flags vane.Flag
 	if st&magStatusZYXDA == 0 {
@@ -182,7 +278,7 @@ func (s *Sensor) ReadMagnetic(ctx context.Context) (Vector3[vane.Gauss], error) 
 
 func (s *Sensor) usable(src vane.Source, deviceErr error) error {
 	if s.closed {
-		return &vane.SensorError{Source: src, Op: "read", Err: vane.ErrClosed}
+		return &vane.SensorError{Source: src, Op: opRead, Err: vane.ErrClosed}
 	}
 	return deviceErr
 }

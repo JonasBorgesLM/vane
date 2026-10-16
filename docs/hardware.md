@@ -623,6 +623,23 @@ existing block read; the accel/gyro block needs a block read that never sets
 the MSB, and `New` must configure every register it relies on rather than
 trust reset values.
 
+### `ReadBatch` on the board (#51, step 5)
+
+`lsm9ds1.New(…, WithFIFO(), WithRate(r))`, then `ReadBatch` into a 32-sample
+slice every `every`, 25 times, on `i2c-1` at the default 100 kHz:
+
+```text
+119.0 Hz, drained every 100ms: 333 samples in 2.89 s = 115/s (expected ~119), overruns 0, |a| 0.960..1.021 g
+952.0 Hz, drained every 20ms: 786 samples in 1.40 s = 562/s (expected ~952), overruns 24, |a| 0.866..1.646 g
+```
+
+At 119 Hz every sample arrives. At 952 Hz **the bus is the limit, as ADR-0008
+expected**: a full drain is 384 bytes, about 35 ms at 100 kHz, longer than the
+33.6 ms the FIFO takes to fill, so every batch follows an overrun. The spread
+of |a| at 952 Hz (0.87–1.65 g, against 0.96–1.02 g at 119 Hz) is not explained
+yet: the wider bandwidth with the Pi's fan running, or a read disturbed by the
+overruns. Both questions are step 6, with the bus at 400 kHz.
+
 ### Still not settled by this board
 
 - **An image whose kernel ships `st_pressure_i2c`:** the stock conflict G-01

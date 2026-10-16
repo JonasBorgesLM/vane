@@ -17,6 +17,7 @@ type config struct {
 	accel           AccelRange
 	gyro            GyroRange
 	mag             MagRange
+	fifo            bool
 }
 
 func defaultConfig() config {
@@ -35,6 +36,12 @@ func defaultConfig() config {
 // together at the gyroscope's rate (DocID025715 Rev 3 p. 19). Its value is the
 // ODR_G code.
 type Rate uint8
+
+// period is the time between two samples at the rate.
+func (r Rate) period() time.Duration {
+	hz := [...]float64{0, 14.9, 59.5, 119, 238, 476, 952}[r]
+	return time.Duration(float64(time.Second) / hz)
+}
 
 // The rates the chip offers with both sensors on.
 const (
@@ -149,3 +156,10 @@ func WithGyroRange(r GyroRange) Option { return func(c *config) { c.gyro = r } }
 
 // WithMagRange sets the magnetometer full scale. The default is Mag4Gauss.
 func WithMagRange(r MagRange) Option { return func(c *config) { c.mag = r } }
+
+// WithFIFO runs the accelerometer and gyroscope through the chip's 32-sample
+// FIFO, in Continuous mode, and makes ReadBatch the way to read them: every
+// sample, oldest first, instead of the latest one (ADR-0008). Read then
+// returns ErrWrongMode. The magnetometer is not in the FIFO and ReadMagnetic
+// works either way.
+func WithFIFO() Option { return func(c *config) { c.fifo = true } }
