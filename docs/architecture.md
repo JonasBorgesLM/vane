@@ -253,6 +253,38 @@ cost less than a shared engine that would need a callback for every difference
 (status bits, output length, configuration, conversion); a third chip would
 change that.
 
+**LSM9DS1** (`chip/lsm9ds1`, ADR-0008) is implemented for `New`, `Read`,
+`ReadMagnetic` and `Close`; batch reads from the FIFO come next (#51). It shares
+nothing with the two drivers above: the chip has no one-shot, so there is no
+trigger, wait or settle to repeat.
+
+```go
+type Vector3[T ~float64] struct{ X, Y, Z vane.Measurement[T] } // each axis a full measurement
+type Motion struct {
+	Acceleration Vector3[vane.StandardGravity]
+	AngularRate  Vector3[vane.DegreesPerSecond]
+}
+
+func New(ctx context.Context, bus vane.Bus, opts ...Option) (*Sensor, error) // fails only if neither device identifies
+func (s *Sensor) Read(ctx context.Context) (Motion, error)                      // latest accel+gyro sample
+func (s *Sensor) ReadMagnetic(ctx context.Context) (Vector3[vane.Gauss], error) // latest magnetometer sample
+func (s *Sensor) Close(ctx context.Context) error
+
+// Options: WithRate (14.9–952 Hz, accel and gyro together), WithAccelRange
+// (2/4/8/16 g), WithGyroRange (245/500/2000 dps), WithMagRange (4/8/12/16
+// gauss), WithAccelGyroAddress, WithMagnetometerAddress, WithBusName, WithClock.
+```
+
+- **Two devices, two errors.** Each is identified before it is written; one
+  that does not identify is never written and its reads return the error.
+- **Two increment schemes**: `regio.NewIncrementByRegister` for 0x6A (with
+  `CTRL_REG8.IF_ADD_INC` set first), `regio.New` for 0x1C (ADR-0008).
+- **Configuration is written in full**, never trusted from reset values; BDU on
+  in both devices; the FIFO in Bypass, so `Read` returns the latest sample.
+- **Flags**: `FlagStale` from `GDA`/`XLDA`/`ZYXDA`; `FlagOverrun` from
+  `ZYXOR` on the magnetometer; `FlagClamped` on an axis at ±32767/−32768, where
+  the chip saturates.
+
 ### What a driver must not do
 
 - Write before `WHO_AM_I` matches (RF-01).

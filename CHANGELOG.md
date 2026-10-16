@@ -11,6 +11,19 @@ with no section here.
 
 ## [Unreleased]
 
+### Added
+
+- `chip/lsm9ds1`: the Sense HAT's IMU (ADR-0008). `New` identifies the
+  accelerometer/gyroscope (0x6A) and the magnetometer (0x1C) separately and
+  keeps either working if the other fails; `Read` returns acceleration and
+  angular rate, `ReadMagnetic` the magnetic field, in g, dps and gauss, with
+  rate and full-scale options. Batch reads from the FIFO are not in yet.
+- `vane`: `StandardGravity`, `DegreesPerSecond`, `Gauss` and `ChipLSM9DS1`.
+- `internal/regio`: a second auto-increment scheme for devices that increment
+  by a register bit (#104).
+- `vanetest`: register models of the LSM9DS1's two devices, checked against the
+  chip by the conformance suite.
+
 ## [0.1.2] - 2026-10-16
 
 ### Added
