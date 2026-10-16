@@ -680,6 +680,49 @@ At 952 Hz the slowest `ReadBatch` is 36 ms, a full FIFO; a caller that drains
 less often than every 33 ms at that rate loses samples, and is told so by
 `FlagOverrun`.
 
+### The bus at 400 kHz (#51, step 6)
+
+`dtparam=i2c_arm_baudrate=400000` added to `config.txt` (a short line right
+after `dtparam=i2c_arm=on`), after a backup; after the reboot the device tree's
+`clock-frequency` for `i2c@74000` read 400000 (100000 before), `vclog` showed
+the dtparam and `vane-sense`, and every device answered at its address. Then
+restored from the backup and rebooted: 100000 again. Results at 400 kHz:
+
+```text
+  119 Hz:    111 samples/s (94%), overruns 0, slowest ReadBatch 500µs, |a| p1 1.012 p50 1.014 p99 1.020 max 1.021 g
+  238 Hz:    225 samples/s (95%), overruns 0, slowest ReadBatch 800µs, |a| p1 0.998 p50 1.013 p99 1.026 max 1.037 g
+  476 Hz:    444 samples/s (93%), overruns 0, slowest ReadBatch 800µs, |a| p1 1.011 p50 1.013 p99 1.015 max 1.016 g
+  952 Hz:    902 samples/s (95%), overruns 0, slowest ReadBatch 1.1ms, |a| p1 1.011 p50 1.013 p99 1.016 max 1.017 g
+952.0 Hz, drained every 20ms: 614 samples in 0.69 s = 891/s, overruns 0      (24 overruns at 100 kHz)
+```
+
+The rest of the bus at 400 kHz: the hardware suite passed for the HTS221, the
+LPS25H and the LSM9DS1, one-shot latencies a little lower (HTS221 at 32/16:
+5.7 ms against 7.0 ms; LPS25H at 512/64: 37.2 ms against 40.3 ms); the LED
+matrix took an 8×8 frame and read it back; the joystick stayed registered;
+`vane-probe -require all` exited 0; no I2C error in `dmesg`. The colour sensor at
+0x39 answered `i2cdetect`; it is not driven yet, so nothing more was checked.
+
+What it means for a deployment:
+
+| Bus | 952 Hz drained continuously | 952 Hz drained every 20 ms | A full FIFO's drain |
+| --- | --- | --- | --- |
+| 100 kHz (default) | every sample | an overrun before every batch | about 35 ms, longer than the 33.6 ms the FIFO takes to fill |
+| 400 kHz | every sample | every sample | about 9 ms |
+
+At 100 kHz, 952 Hz works only for a caller that drains without pausing; any
+cadence at that rate needs 400 kHz. At 476 Hz and below, 100 kHz leaves room
+(a full FIFO lasts 67 ms or more). vane does not set the bus speed (ADR-0008).
+
+### LSM9DS1 transcripts (#51, step 6)
+
+`testdata/transcripts/lsm9ds1-pi5-read.txt` and `lsm9ds1-pi5-batch.txt`,
+recorded at 100 kHz by `TestRecordTranscript` (`chip/lsm9ds1`, `-tags
+hardware`), replayed in every `go test`. They show both identities read before
+any write, `CTRL_REG8` = 0x44 before any block read, the bare sub-address
+(`W 18`) on 0x6A and the MSB on 0x1C, and in the batch one the turn-on samples
+dropped: 11 held after 100 ms, all dropped, then 2 more dropped and 11 returned.
+
 ### Still not settled by this board
 
 - **An image whose kernel ships `st_pressure_i2c`:** the stock conflict G-01
