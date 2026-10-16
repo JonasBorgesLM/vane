@@ -638,10 +638,14 @@ suite need the Pi.
 
 | Version | Scope | Depends on |
 | --- | --- | --- |
-| v0.2 (optional) | IIO backend for kernel-owned chips (#47) | M1 result and real use in beacon |
-| v0.3 | LSM9DS1 IMU: FIFO, high-rate reads, streaming, 400 kHz (#51) | New ADRs on streaming and IMU kernel ownership |
-| v0.4 | TCS3400: 0x29/0x39 probing and ID register (#52) | Confirmation on a v2 board on a Pi 5 |
-| future | LED matrix and joystick | beacon needing alert commands |
+| v0.2.0, released | LSM9DS1 IMU: `Read`, FIFO batch reads, 400 kHz measured (#51) | ADR-0008 |
+| not scheduled | IIO backend for kernel-owned chips (#47) | ADR-0001's reopening criterion: a consumer that cannot change `config.txt` on a kernel that binds the LPS25H |
+| not scheduled | TCS3400: 0x29/0x39 probing and ID register (#52) | Confirmation on a v2 board on a Pi 5 (a device answers at 0x39) |
+| future | IMU in the `sensehat` facade; LED matrix and joystick | a consumer showing the shape it needs; beacon needing alert commands |
+
+Versions are numbered when released, by what they change (a minor for new API,
+as gorelease suggests), not in advance: the IMU shipped as v0.2.0 because the
+IIO release planned before it never had a trigger.
 
 ---
 
@@ -681,6 +685,7 @@ translates it and applies what that review decided:
 
 | Date | Change | Why |
 | --- | --- | --- |
+| 2026-10-16 | Roadmap after v0.1 rewritten: the IMU shipped as v0.2.0; IIO and the colour sensor unscheduled | The planned v0.2 (IIO) had no trigger under ADR-0001, so the numbering assumed a release that did not happen |
 | 2026-10-16 | Appendix A: LSM9DS1 identity confirmed; its two auto-increment schemes recorded | Read-only on the board with `vane-sense` loaded, against DocID025715 Rev 3 (#51, step 0) |
 | 2026-10-16 | Appendix A: operating ranges and LPS25H/HB averaging moved to Confirmed from the datasheets; the averaging conflict settled; overlay rows corrected to what the board shows (nodes declared, no driver bound on 6.12.62) | Datasheets read from distributor copies with document id and page; board facts from M1; detail in [docs/hardware.md](docs/hardware.md) (#17) |
 | 2026-10-12 | Appendix A: LPS25H temperature formula, pressure sign, LPS25HB identity and the auto-increment bit moved to Confirmed; averaging sample counts recorded as a conflict between sources | Same method as the HTS221 row; detail in [docs/hardware.md](docs/hardware.md) (#17, partly) |
