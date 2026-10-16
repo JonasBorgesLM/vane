@@ -10,7 +10,7 @@ Part of a small ecosystem of Go projects (moat, bastion, cistern, crier, cairn,
 sapper, warden, usher). The name comes from the weather vane on top of a tower:
 the instrument that read the environment.
 
-> **Status: v0.1.1.** Both drivers, the board API, the test fakes and
+> **Status: v0.1.2.** Both drivers, the board API, the test fakes and
 > `vane-probe` work and are tested on a Pi 5.
 > Progress is on the [project board](https://github.com/users/JonasBorgesLM/projects/8).
 
@@ -102,7 +102,7 @@ The `vane-sense` overlay disables those nodes so no driver can bind, and keeps
 the LED matrix and the joystick working:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/JonasBorgesLM/vane/v0.1.1/overlays/vane-sense.dts
+curl -fsSLO https://raw.githubusercontent.com/JonasBorgesLM/vane/v0.1.2/overlays/vane-sense.dts
 dtc -@ -I dts -O dtb -o vane-sense.dtbo vane-sense.dts
 sudo cp vane-sense.dtbo /boot/firmware/overlays/
 grep -qx 'dtoverlay=vane-sense' /boot/firmware/config.txt || echo 'dtoverlay=vane-sense' | sudo tee -a /boot/firmware/config.txt
@@ -128,7 +128,7 @@ over:
 
 ```sh
 # on your computer
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go install github.com/JonasBorgesLM/vane/cmd/vane-probe@v0.1.1
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go install github.com/JonasBorgesLM/vane/cmd/vane-probe@v0.1.2
 scp "$(go env GOPATH)/bin/linux_arm64/vane-probe" pi@raspberrypi.local:
 ```
 
@@ -136,7 +136,7 @@ A cross-compiled `go install` puts the binary under `bin/linux_arm64/`, not
 `bin/`.
 
 With Go 1.26 or newer on the Pi itself, `go install
-github.com/JonasBorgesLM/vane/cmd/vane-probe@v0.1.1` does the same. Then, on
+github.com/JonasBorgesLM/vane/cmd/vane-probe@v0.1.2` does the same. Then, on
 the Pi:
 
 ```sh
@@ -188,14 +188,18 @@ How long one one-shot `Read` takes, trigger to converted sample, measured on
 a Raspberry Pi 5 with a Sense HAT v2 (median of 20 reads, `TestHardwareLatency`;
 detail in [`docs/hardware.md`](docs/hardware.md)):
 
-| Chip | Averaging (humidity/temperature samples) | Median |
+| Chip | Averaging (samples per quantity) | Median |
 | --- | --- | --- |
 | HTS221 | 4/2, 8/4, 16/8, **32/16 (default)** | 7.0 ms |
 | HTS221 | 64/32 | 12.5 ms |
 | HTS221 | 128/64 | 18.1 ms |
 | HTS221 | 256/128 | 29.2 ms |
 | HTS221 | 512/256 | 51.3 ms |
-| LPS25H | chip default (no averaging option yet) | 40.3 ms |
+| LPS25H | 8/8, 32/8, 8/64 (pressure/temperature) | 7.1 ms |
+| LPS25H | 128/8, 32/64 | 12.6 ms |
+| LPS25H | 128/64 | 18.2 ms |
+| LPS25H | 512/8 | 34.8 ms |
+| LPS25H | **512/64 (the LPS25HB's reset value)** | 40.4 ms |
 
 The driver polls the status register every 5 ms (`WithPollInterval`), so these
 figures are the conversion time rounded up to that step plus the bus traffic,

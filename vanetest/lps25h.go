@@ -35,11 +35,11 @@ const (
 
 // LPS25HModel is a register-level model of the LPS25H or LPS25HB on a FakeBus.
 //
-// The writable set is the two control registers vane may touch, CTRL_REG1 and
-// CTRL_REG2. RES_CONF, CTRL_REG3 and 4, the reference, threshold and FIFO
-// registers are writable on the chip, but vane has no reason to write them
-// (averaging is deliberately left alone, see docs/hardware.md), so a write to
-// one is a driver bug and fails the test.
+// The writable set is the registers vane may touch: RES_CONF (averaging, with
+// its reserved bits 7:4 kept at 0), CTRL_REG1 and CTRL_REG2. CTRL_REG3 and 4,
+// the reference, threshold and FIFO registers are writable on the chip, but
+// vane has no reason to write them, so a write to one is a driver bug and fails
+// the test.
 //
 // Two further rules are vane's, not the chip's, and are reported: CTRL_REG1 is
 // never written with BDU off (ADR-0005) or with SIM, RESET_AZ or DIFF_EN set,
@@ -53,9 +53,6 @@ type LPS25HModel struct {
 	p vane.Hectopascal
 	t vane.Celsius
 
-	// readOut records which of the five output bytes were read since the last
-	// sample was latched: bits 0 to 2 pressure, bits 3 and 4 temperature.
-	readOut     uint8
 	converting  bool
 	presPending bool // staggered: the pressure half is still to finish
 	pending     int
@@ -72,7 +69,7 @@ var (
 // state: power-down, no sample.
 func NewLPS25H(opts ...ModelOption) *LPS25HModel {
 	m := &LPS25HModel{opts: newModelOptions(opts)}
-	m.regs = NewRegs(m.opts.rep, lps25hAddr, lRegCtrl1, lRegCtrl2)
+	m.regs = NewRegs(m.opts.rep, lps25hAddr, lRegResConf, lRegCtrl1, lRegCtrl2)
 	id := uint8(0xBD)
 	if m.opts.whoAmI != nil {
 		id = *m.opts.whoAmI
@@ -120,7 +117,7 @@ func (m *LPS25HModel) powerOn() {
 		m.regs.Set(reg, 0)
 	}
 	m.regs.Set(lRegResConf, lResConfDefault)
-	m.converting, m.presPending, m.pending, m.readOut = false, false, 0, 0
+	m.converting, m.presPending, m.pending = false, false, 0
 }
 
 // Tx implements Device.
@@ -148,6 +145,9 @@ func (m *LPS25HModel) Tx(w, rd []byte) error {
 func (m *LPS25HModel) checkWrite(w []byte) error {
 	reg := int(w[0] & regMask)
 	data := w[1:]
+	if i := lRegResConf - reg; i >= 0 && i < len(data) && data[i]&0xF0 != 0 {
+		return m.regs.violation("RES_CONF written as 0x%02x: bits 7:4 are reserved", data[i])
+	}
 	if i := lRegCtrl1 - reg; i >= 0 && i < len(data) {
 		v := data[i]
 		switch {
@@ -197,22 +197,17 @@ func (m *LPS25HModel) beforeRead(reg, n int) {
 	m.complete()
 }
 
-// afterRead clears a quantity's data-ready and overrun bits once all of its
-// output bytes have been read, in one transaction or several.
+// afterRead clears a quantity's data-ready and overrun bits when the high byte
+// of its output is read, whatever else the transaction reads: PRESS_OUT_H for
+// P_DA and P_OR, TEMP_OUT_H for T_DA and T_OR (LPS25H DocID023722 Rev 6 p. 31,
+// LPS25HB DocID027112 Rev 4 p. 41, and observed on the board).
 func (m *LPS25HModel) afterRead(reg, n int) {
-	for i := range 5 {
-		if r := lRegPressXL + i; r >= reg && r < reg+n {
-			m.readOut |= 1 << i
-		}
-	}
 	status := m.regs.Get(lRegStatus)
-	if m.readOut&0b00111 == 0b00111 {
+	if covers(reg, n, lRegPressXL+2) {
 		status &^= lStatusPDA | lStatusPOR
-		m.readOut &^= 0b00111
 	}
-	if m.readOut&0b11000 == 0b11000 {
+	if covers(reg, n, lRegTempL+1) {
 		status &^= lStatusTDA | lStatusTOR
-		m.readOut &^= 0b11000
 	}
 	m.regs.Set(lRegStatus, status)
 }
@@ -269,7 +264,6 @@ func (m *LPS25HModel) complete() {
 	}
 	setLE16(m.regs, lRegTempL, clampInt16((float64(m.t)-42.5)*480))
 	m.regs.Set(lRegStatus, status|lStatusTDA)
-	m.readOut = 0
 	if m.opts.staggered {
 		m.presPending = true
 		return

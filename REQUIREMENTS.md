@@ -681,6 +681,7 @@ translates it and applies what that review decided:
 
 | Date | Change | Why |
 | --- | --- | --- |
+| 2026-10-16 | Appendix A: operating ranges and LPS25H/HB averaging moved to Confirmed from the datasheets; the averaging conflict settled; overlay rows corrected to what the board shows (nodes declared, no driver bound on 6.12.62) | Datasheets read from distributor copies with document id and page; board facts from M1; detail in [docs/hardware.md](docs/hardware.md) (#17) |
 | 2026-10-12 | Appendix A: LPS25H temperature formula, pressure sign, LPS25HB identity and the auto-increment bit moved to Confirmed; averaging sample counts recorded as a conflict between sources | Same method as the HTS221 row; detail in [docs/hardware.md](docs/hardware.md) (#17, partly) |
 | 2026-10-12 | Appendix A: HTS221 data, calibration and the auto-increment bit moved to Confirmed | Read from the kernel driver and ST's reference header, not from memory; detail in [docs/hardware.md](docs/hardware.md) (#17, partly) |
 
@@ -705,16 +706,19 @@ translates it and applies what that review decided:
 | LPS25H: pressure | 24 bits from 0x28, **signed**; hPa = value / 4096 | Confirmed | ST header and reference code; kernel channel `sign = 's'` |
 | LPS25H: BDU and ONE_SHOT | BDU at bit 2 of CTRL_REG1; ONE_SHOT at bit 0 of CTRL_REG2; rates one-shot, 1, 7, 12.5, 25 Hz | Confirmed | ST header |
 | LPS25H: temperature | 42.5 + value / 480 (°C), 16-bit signed | Confirmed | ST `lps25hb_reg.c`; kernel `st_pressure_core.c`; [docs/hardware.md](docs/hardware.md) |
-| LPS25H: overlay | IIO driver **active** (`st,lps25h-press`) | Confirmed | Official overlays |
-| Sense HAT v2: chips | HTS221, LPS25HB, TCS3400 colour sensor | Probable | Reseller listings; Raspberry Pi change notice mentions qualified alternatives and a new colour sensor |
+| LPS25H: overlay | IIO node declared (`st,lps25h-press`); whether a driver binds depends on the kernel build — none on 6.12.62, whose image ships no `st_pressure` module | Confirmed | Official overlays; the board, [docs/hardware.md](docs/hardware.md) |
+| Sense HAT v2: chips | HTS221, LPS25HB, TCS3400 colour sensor | Probable (board: a device answers at 0x39; `RES_CONF` reads the LPS25HB reset value 0x0F) | Reseller listings; Raspberry Pi change notice; the board, [docs/hardware.md](docs/hardware.md) |
 | Sense HAT v2: kernel support | from 2022-10-31, version 5.15.74 | Confirmed | Raspberry Pi product change notice (PCN) |
-| LSM9DS1 | accel/gyro 0x6A, magnetometer 0x1C; IIO drivers active in the overlay | Confirmed | Official overlays |
+| LSM9DS1 | accel/gyro 0x6A, magnetometer 0x1C; IIO nodes declared in the overlay, no driver bound on 6.12.62 | Confirmed | Official overlays; the board |
 | LSM9DS1: WHO_AM_I | 0x68 (accel/gyro), 0x3D (mag) | To confirm | Memory |
 | TCS3400 | 0x29 or 0x39 by variant; ID at 0x92 (0x90 or 0x93) | Probable | ams flyer; ChromiumOS driver; the official Python library probes both |
 | TCS3400 in the overlay | no node declared | Confirmed | v2 overlay |
 | LED/joystick microcontroller | 0x46; EEPROM write-protect register | Confirmed | Official Sense HAT documentation |
-| Pi 5: header bus | GPIO2/3 = i2c1 → normally `/dev/i2c-1` | Probable | pinout.xyz; confirm with `i2cdetect -l` |
+| Pi 5: header bus | GPIO2/3 = i2c1 → `/dev/i2c-1` | Confirmed | pinout.xyz; `i2cdetect -l` on the board |
 | ST block-read auto-increment bit | MSB of the sub-address, for reads and writes | Confirmed (HTS221 and LPS25H) | Kernel `hts221_i2c.c`; kernel `st_sensors_i2c.c` for the LPS25H |
+| HTS221: operating range | 0–100 %RH, −40…+120 °C | Confirmed | DocID026333 Rev 4, Table 3 p. 8 |
+| LPS25H/HB: operating range | 260–1260 hPa, −30…+105 °C | Confirmed | DocID023722 Rev 6 Table 3 p. 7; DocID027112 Rev 4 Table 3 p. 9 |
+| LPS25H/HB: averaging | `AVGP` 8, 32, 128, 512; `AVGT` 8, 16, 32, 64 (ST's header is wrong for `AVGP`); reset `RES_CONF` 0x05 (LPS25H), 0x0F (LPS25HB) | Confirmed, bit positions excepted | DocID023722 Rev 6 Tables 16–17 p. 24; DocID027112 Rev 4 Tables 18–19 p. 34; [docs/hardware.md](docs/hardware.md) |
 
 ## Appendix B — Sanity check on the Pi 5
 

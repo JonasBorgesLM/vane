@@ -40,15 +40,38 @@ The last row is why `Calibration.Validate` exists (G-12): the reference driver
 trusts the chip, and a chip that reads back identical calibration points is
 reported in the field.
 
-## Still to confirm
+## HTS221 — from the datasheet and the board
+
+Datasheet **DocID026333 Rev 4** (August 2016), read on 2026-10-16 from the copy
+at `static.rapidonline.com/pdf/73-0218_v1.pdf` (st.com refuses automated
+downloads; Rev 5 of March 2023 is the current one and was not read). "Board"
+means observed on the Pi 5 (*Observations from the board*, below).
+
+| Fact | Value | Source |
+| --- | --- | --- |
+| Operating range | humidity 0–100 %RH, temperature −40…+120 °C — what the driver uses for `FlagOutOfRange` and the clamp | datasheet p. 1, Table 3 p. 8 |
+| Out-of-range humidity | "must be clipped by SW" — what the driver's clamp does | p. 25 |
+| Averaging (`AV_CONF`) | `AVGT` bits 5:3 = 2…256 samples, `AVGH` bits 2:0 = 4…512, default code 011 (16/32) — matches the kernel and the driver | Table 16, p. 21 |
+| `ONE_SHOT` | starts one acquisition; at the end of conversion the data are in the output registers, `H_DA`/`T_DA` are set and **`ONE_SHOT` comes back to 0 by hardware**, so it reads 1 while pending | p. 23; board: reads 1 right after the trigger, 0 once both flags are set |
+| `ONE_SHOT` written while `PD` = 0 | not stated | board: **latched**, nothing converts, the conversion runs on power-up |
+| `H_DA` / `T_DA` | set on a new sample; **cleared when the high byte is read** (`HUMIDITY_OUT_H` 0x29, `TEMP_OUT_H` 0x2B) | p. 24; board: reading only `HUMIDITY_OUT_L` does not clear `H_DA` |
+| `STATUS_REG` and BDU | updated on every one-shot and ODR cycle "regardless of the BDU value" | p. 24 |
+| BDU | after one half of an output is read, that output is not updated until the other half is | p. 22 |
+| Reserved 0x34, 0x38, 0x39 in the calibration block | not described | board: the 16-byte read is clean and stable |
+
+`vanetest`'s models clear a data-ready bit (and, on the LPS25H, its overrun bit)
+when the high byte of its output is read, as the datasheets say and the board
+showed: `HUMIDITY_OUT_H` alone took `STATUS_REG` from 0x03 to 0x01, `PRESS_OUT_H`
+alone from 0x03 to 0x01, and from 0x33 to 0x11 in continuous mode. They used to
+wait for every byte, which was stricter than the chip; the drivers always read
+the whole block, so no driver behaviour depended on it. The conformance suite
+now asserts both halves (low byte alone leaves it set, high byte clears it).
+
+### Still to confirm for the HTS221
 
 | Fact | Needed for | Where it can be settled |
 | --- | --- | --- |
-| Conversion time per averaging setting | the one-shot ready timeout (default 1 s is a deliberate over-estimate) | datasheet table, then measured on the Pi (#14) |
-| Operating range: humidity 0–100 %RH, temperature −40…+120 °C | `FlagOutOfRange` | datasheet front page; written from memory in the driver |
-| Whether reading the reserved registers 0x34, 0x38, 0x39 inside the 0x30–0x3F calibration block is harmless | the driver reads that block in one transaction | first transcript on the Pi (#30) |
-| Whether `ONE_SHOT` is ignored while `PD` = 0 | what the model does after a chip reset | datasheet; the model assumes it is ignored, which is the cautious reading |
-| Whether `ONE_SHOT` reads back 1 while a conversion is in progress and 0 once it ends | recovery after a timeout: the driver asks the chip whether a conversion is still pending instead of guessing whether it reset | datasheet (`CTRL_REG2` description); the ST header names the bit but not its read-back |
+| Conversion time per averaging setting | the one-shot ready timeout (default 1 s) | not in the datasheet (Table 16 gives noise and current only); measured on the board as an upper bound, see *Conformance suite on the board* |
 | Whether a brown-out leaves `PD` = 0 (so the symptom is `ErrNotReady`) | reset recovery (ADR-0005) | observed only by cutting power to the HAT; otherwise it stays an inference |
 
 ## LPS25H / LPS25HB — confirmed from primary sources
@@ -92,16 +115,62 @@ for one of the two chips, and the kernel does not touch `RES_CONF`. Until the
 datasheet settles it, vane leaves `RES_CONF` alone and offers no averaging
 option for the LPS25H.
 
+**Settled on 2026-10-16 by both datasheets: the header is wrong for pressure.**
+LPS25H DocID023722 Rev 6 (Tables 16–17, p. 24) and LPS25HB DocID027112 Rev 4
+(Tables 18–19, p. 34) agree: `AVGP` 00…11 = **8, 32, 128, 512** pressure
+samples, `AVGT` 00…11 = 8, 16, 32, 64 temperature samples. The chips differ in
+the reset value: `RES_CONF` = **0x05** on the LPS25H (32/16), **0x0F** on the
+LPS25HB (512/64). The board reads `RES_CONF` = 0x0F, and vane never writes it,
+so the Sense HAT v2 tested most likely carries an LPS25HB — a hint, not an
+identification (ADR-0003), since anything on the bus can write that register.
+
+The bit positions are not settled by the LPS25H datasheet itself: its register
+figure reads `AVGT1 AVGT0 AVGP1 AVGP0` (temperature in bits 3:2) while the
+field list under it puts `AVGP` in [3:2]. The LPS25HB datasheet's figure and
+ST's header both put `AVGT` in 3:2 and `AVGP` in 1:0. An averaging option must
+settle this on the board before writing the register (#17 follow-up).
+
+**Settled on the board (LPS25HB, by its `RES_CONF` reset value): `AVGP` is bits
+1:0, `AVGT` bits 3:2**, as the LPS25HB figure and ST's header say. Setting bits
+1:0 alone (0x03) lengthens a one-shot conversion from 2.5 ms to 32.6 ms; bits
+3:2 alone (0x0C) to 5.5 ms; and pressure averaging is the one that costs. The
+one-shot conversion time for every code, timed from the `ONE_SHOT` write to both
+data-ready bits by polling `STATUS_REG` as fast as the bus allows (median of 9,
+Pi 5, `RES_CONF` restored to 0x0F afterwards):
+
+| Pressure \ temperature samples | 8 | 16 | 32 | 64 |
+| --- | --- | --- | --- | --- |
+| 8 | 2.5 ms | 3.0 ms | 3.8 ms | 5.5 ms |
+| 32 | 3.8 ms | 4.2 ms | 5.1 ms | 7.2 ms |
+| 128 | 9.7 ms | 10.2 ms | 11.0 ms | 13.1 ms |
+| 512 | 32.6 ms | 33.0 ms | 34.3 ms | 36.0 ms |
+
+`chip/lps25h` offers `WithAveraging` from these facts. A board carrying an
+LPS25H rather than an LPS25HB would need the same timing check, since its own
+datasheet contradicts itself on the bit positions.
+
+### LPS25H / LPS25HB — from the datasheets and the board
+
+Datasheets **LPS25H DocID023722 Rev 6** (October 2018, copy at
+`cdn.components.ru/media/PDF/2284792.pdf`) and **LPS25HB DocID027112 Rev 4**
+(August 2016, `cdn.components.ru/media/PDF/2280851.pdf`), read on 2026-10-16.
+
+| Fact | Value | Source |
+| --- | --- | --- |
+| Operating range | pressure 260–1260 hPa, temperature −30…+105 °C, both chips — what the driver uses | LPS25H p. 1, Table 3 p. 7; LPS25HB p. 1, Table 3 p. 9 |
+| Out-of-range pressure | "values exceeding the operating pressure range are clipped" by the chip | LPS25H p. 32 |
+| `ONE_SHOT` | starts one measurement when `ODR` = 000; once done it **self-clears**, the data are in the output registers and `STATUS_REG` is updated | LPS25H p. 28; LPS25HB p. 37; board: reads 1 right after the trigger |
+| `ONE_SHOT` written while `PD` = 0 | not stated | board: latched, runs on power-up, as the HTS221 |
+| `P_DA` / `T_DA` | set on a new sample; cleared when **`PRESS_OUT_H` (0x2A)** / **`TEMP_OUT_H` (0x2C)** is read | LPS25H p. 31; LPS25HB p. 41 |
+| `P_OR` / `T_OR` | set when new data arrive while `P_DA`/`T_DA` from the previous ODR cycle was not cleared; cleared with the same high-byte read | LPS25H p. 31; LPS25HB p. 41 |
+| `STATUS_REG` and BDU | "updated every ODR cycle, regardless of BDU": with BDU on, an unread sample held back still raises the overrun bit, so **`FlagOverrun` can appear in continuous mode**; in one-shot mode it should not, since the datasheet ties it to ODR cycles (an inference) | LPS25H p. 31; LPS25HB p. 41; board: `P_OR`/`T_OR` 0 after a one-shot and a full read; at 25 Hz with BDU on and nothing read for 1 s, `STATUS_REG` = **0x33**, and reading the 5 output bytes returns it to 0x00 |
+| Boot | the `BOOT` process takes 2.2 ms (LPS25HB); the kernel uses 2 ms | LPS25HB p. 37 |
+
 ### Still to confirm for the LPS25H
 
 | Fact | Needed for | Where it can be settled |
 | --- | --- | --- |
-| The averaging sample counts per `AVGP`/`AVGT` code | an averaging option | datasheet, for each of the two chips |
-| Conversion time (default averaging) | the one-shot ready timeout (default 1 s is an over-estimate) | datasheet, then measured on the Pi (#14) |
-| Operating range: pressure 260–1260 hPa, temperature −30…+105 °C | `FlagOutOfRange`; only 1260 is confirmed (full scale) | datasheet; the driver has the rest from memory |
-| Whether `P_OR`/`T_OR` are raised when `BDU` is on and a sample is held back | whether `FlagOverrun` can ever appear, since vane keeps `BDU` on | datasheet, or a long run on the Pi |
-| Whether reading the output registers clears `P_DA`/`T_DA` and the overrun bits | the model's flag handling | datasheet |
-| Whether `ONE_SHOT` reads back 1 while a conversion is pending | recovery after a timeout (as for the HTS221) | datasheet |
+| The `RES_CONF` bit positions on an LPS25H (this board carries an LPS25HB) | `WithAveraging` on such a board | a board with an LPS25H, timing as above |
 
 The LSM9DS1 facts, and everything about kernel ownership on the Pi, are in
 REQUIREMENTS Appendix A and still await M1.

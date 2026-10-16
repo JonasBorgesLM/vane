@@ -94,9 +94,8 @@ func HTS221(t *testing.T, tg Target) {
 				"The driver and the model both assume it clears itself", d.read(hCtrl2))
 		}
 
-		// ASSUMPTION: a data-ready flag clears once both bytes of its output have
-		// been read. Asserted in the weak form that holds whichever byte the chip
-		// keys on; the strict form is observed.
+		// A data-ready flag clears when the high byte of its output is read
+		// (DocID026333 Rev 4 p. 24). Reading both bytes covers it.
 		d.block(hOut, 2) // both humidity bytes
 		afterH := d.read(hStatus)
 		if afterH&hHDA != 0 {
@@ -108,12 +107,17 @@ func HTS221(t *testing.T, tg Target) {
 			t.Errorf("a data-ready flag is still set after every output byte was read: STATUS_REG = %#x", got)
 		}
 
-		// Does one byte clear it? The strict model says no.
+		// The low byte alone leaves H_DA set; the high byte alone clears it.
 		d.write(hCtrl2, hOneShot)
 		d.waitFor(tg, hStatus, hBothDA)
 		d.read(hOut)
-		oneByte := d.read(hStatus)&hHDA == 0
-		observe(t, "H_DA cleared by reading only HUMIDITY_OUT_L: %v (the model assumes false)", oneByte)
+		if d.read(hStatus)&hHDA == 0 {
+			t.Errorf("H_DA cleared by reading only HUMIDITY_OUT_L; the datasheet clears it on HUMIDITY_OUT_H")
+		}
+		d.read(hOut + 1)
+		if d.read(hStatus)&hHDA != 0 {
+			t.Errorf("H_DA still set after HUMIDITY_OUT_H was read")
+		}
 		d.block(hOut, 4)
 	})
 

@@ -11,6 +11,24 @@ with no section here.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-16
+
+### Added
+
+- `chip/lps25h`: `WithAveraging(Averaging{Pressure, Temperature})`, now that
+  the datasheets settled the sample counts (#17) and the board the bit
+  positions. A zero field keeps the chip's own value, since the LPS25H and the
+  LPS25HB reset differently. One-shot latency goes from 40.4 ms at the
+  LPS25HB's 512/64 to 7.1 ms at 8/8.
+
+### Changed
+
+- `vanetest`: the HTS221 and LPS25H models clear a data-ready bit (and the
+  LPS25H's overrun bit) when the high byte of its output is read, as both
+  datasheets say and the chips did on the board. They used to wait for every
+  byte. A test that reads only part of an output can now see a flag clear
+  earlier than before; the drivers read whole blocks and are unaffected.
+
 ## [0.1.1] - 2026-10-16
 
 ### Fixed

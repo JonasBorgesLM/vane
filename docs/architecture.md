@@ -209,8 +209,8 @@ while a conversion is pending. A chip that reset reads 0 and holds nothing; one
 that merely stalled still reads 1, and the `Read` lets that conversion end and
 drains its sample before it triggers, because a second trigger on top of it is
 two sequences on one chip (ADR-0004). The same settling happens after a `Read`
-cut short by the context. (That `ONE_SHOT` reads back this way is listed in
-`docs/hardware.md` as still to confirm.)
+cut short by the context. (That `ONE_SHOT` reads back this way is in the
+datasheet and was observed on the board, `docs/hardware.md`.)
 
 **LPS25H/LPS25HB** (`chip/lps25h`, `DefaultAddress = 0x5C`) is implemented, with
 the same shape and these differences:
@@ -225,10 +225,13 @@ type Sample struct {
 func (s *Sensor) Variant() Variant // always VariantUnknown: nothing readable tells the chips apart
 ```
 
-- **No `Calibration`**: the chip is factory-trimmed. No `Averaging` and no
-  `WithAveraging`: the sample counts per `AVGP`/`AVGT` code are a conflict
-  between sources (`docs/hardware.md`), so `RES_CONF` is left as the chip has it
-  and `New` writes `CTRL_REG1` and nothing else.
+- **No `Calibration`**: the chip is factory-trimmed.
+- **`Averaging{Pressure, Temperature}`** (8/32/128/512 and 8/16/32/64) through
+  `WithAveraging`. A zero field keeps what the chip has, because the reset value
+  differs within the family (32/16 on the LPS25H, 512/64 on the LPS25HB);
+  `RES_CONF` is read, the requested fields replaced, and written back in
+  `configure`, so a reinit after a reset applies it again. Without the option
+  `RES_CONF` is left alone and `New` writes `CTRL_REG1` and nothing else.
 - **Flags**: `FlagOverrun` can be set (the status register has `P_OR` and
   `T_OR`), per quantity, in continuous mode; `FlagStale` likewise from the
   data-ready bits; `FlagOutOfRange` for pressure outside 260–1260 hPa and

@@ -156,6 +156,16 @@ func (s *Sensor) takeOver(ctx context.Context) error {
 }
 
 func (s *Sensor) configure(ctx context.Context) error {
+	// Again on a reinit: a reset puts RES_CONF back to the chip's default.
+	if s.cfg.avg != (Averaging{}) {
+		cur, err := s.dev.Read(ctx, regResConf)
+		if err != nil {
+			return s.fail("configure", regResConf, err)
+		}
+		if err := s.dev.Write(ctx, regResConf, s.cfg.avg.resConf(cur)); err != nil {
+			return s.fail("configure", regResConf, err)
+		}
+	}
 	ctrl1 := uint8(ctrl1PD | ctrl1BDU)
 	if s.cfg.mode.continuous {
 		ctrl1 |= uint8(s.cfg.mode.rate) << ctrl1ODRShift

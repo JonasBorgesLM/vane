@@ -1,7 +1,7 @@
 package hts221
 
-// The chip's operating range for temperature, from the datasheet (to confirm,
-// see docs/hardware.md). A reading outside it is kept as converted and flagged.
+// The chip's operating range for temperature, DocID026333 Rev 4 Table 3 (see
+// docs/hardware.md). A reading outside it is kept as converted and flagged.
 const (
 	tempMinOperating = -40.0
 	tempMaxOperating = 120.0

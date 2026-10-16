@@ -199,18 +199,26 @@ func TestHTS221OneShotWhilePoweredDownRunsOnPowerUp(t *testing.T) {
 	}
 }
 
-func TestHTS221AFlagClearsOnlyWhenBothBytesOfItsOutputWereRead(t *testing.T) {
+// The high byte of an output clears its flag; the low byte does not
+// (DocID026333 Rev 4 p. 24; on the board, HUMIDITY_OUT_H alone took STATUS_REG
+// from 0x03 to 0x01). Negative control: the earlier model, which waited for both
+// bytes, fails the high-byte-first half.
+func TestHTS221AFlagClearsWhenTheHighByteOfItsOutputIsRead(t *testing.T) {
 	h := newHTS(t)
 	_ = h.write(0x20, pd|bdu)
 	_ = h.write(0x21, oneShot)
 	_ = h.status()
 	h.read(0x28, 1)
 	if s := h.status(); s != hDA|tDA {
-		t.Fatalf("after one humidity byte: status %#x, want both flags still set", s)
+		t.Fatalf("after HUMIDITY_OUT_L: status %#x, want both flags still set", s)
 	}
-	h.read(0x29, 1) // the second byte, in a second transaction
+	h.read(0x29, 1)
 	if s := h.status(); s != tDA {
-		t.Fatalf("after both humidity bytes: status %#x, want only T_DA left", s)
+		t.Fatalf("after HUMIDITY_OUT_H: status %#x, want only T_DA left", s)
+	}
+	h.read(0x2B, 1) // TEMP_OUT_H alone, its low byte never read
+	if s := h.status(); s != 0 {
+		t.Fatalf("after TEMP_OUT_H alone: status %#x, want 0", s)
 	}
 }
 
