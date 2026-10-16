@@ -39,12 +39,21 @@ func newRig(t *testing.T, agOpts, magOpts []vanetest.ModelOption) *rig {
 	return &rig{ag: ag, mag: mag, bus: vanetest.NewFakeBus(ag, mag)}
 }
 
+// clock is a test clock the test moves by hand.
+type clock struct{ t time.Time }
+
+func (c *clock) now() time.Time { return c.t }
+
+// newSensor makes a Sensor whose turn-on samples are behind it: New runs an
+// hour before fixedTime, every read at fixedTime.
 func newSensor(t *testing.T, r *rig, opts ...lsm9ds1.Option) *lsm9ds1.Sensor {
 	t.Helper()
-	s, err := lsm9ds1.New(bg, r.bus, append([]lsm9ds1.Option{lsm9ds1.WithBusName("/dev/i2c-1"), lsm9ds1.WithClock(func() time.Time { return fixedTime })}, opts...)...)
+	c := &clock{t: fixedTime.Add(-time.Hour)}
+	s, err := lsm9ds1.New(bg, r.bus, append([]lsm9ds1.Option{lsm9ds1.WithBusName("/dev/i2c-1"), lsm9ds1.WithClock(c.now)}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.t = fixedTime
 	return s
 }
 
@@ -309,10 +318,12 @@ func (b directBus) Tx(_ context.Context, addr uint16, w, r []byte) error {
 // RNF-08: no allocation per read at the driver level.
 func TestReadDoesNotAllocate(t *testing.T) {
 	b := directBus{vanetest.NewLSM9DS1AccelGyro(), vanetest.NewLSM9DS1Magnetometer()}
-	s, err := lsm9ds1.New(bg, b)
+	c := &clock{t: fixedTime.Add(-time.Hour)}
+	s, err := lsm9ds1.New(bg, b, lsm9ds1.WithClock(c.now))
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.t = fixedTime
 	for name, fn := range map[string]func(){
 		"Read":         func() { _, _ = s.Read(bg) },
 		"ReadMagnetic": func() { _, _ = s.ReadMagnetic(bg) },
@@ -355,5 +366,29 @@ func TestEachFullScaleWritesItsDatasheetCode(t *testing.T) {
 		if got := r.ag.Peek(0x10) >> 5; got != code {
 			t.Errorf("rate %d: ODR_G = %03b, want %03b", rate, got, code)
 		}
+	}
+}
+
+// The chip's first samples after power-up are wrong without looking wrong; on
+// the board the gyroscope read ±32768 for up to 17 of them at 952 Hz. Read
+// refuses for 13 periods at 119 Hz (DocID025715 Rev 3 Table 12, the LPF1 and
+// LPF2 column) and then reads. Negative control: without the check the first
+// Read returns a sample.
+func TestReadIsNotReadyDuringTheTurnOnSamples(t *testing.T) {
+	r := newRig(t, nil, nil)
+	c := &clock{t: fixedTime}
+	s, err := lsm9ds1.New(bg, r.bus, lsm9ds1.WithClock(c.now), lsm9ds1.WithRate(lsm9ds1.Rate119Hz))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.ag.Tick()
+	settle := 13 * time.Second / 119
+	c.t = fixedTime.Add(settle - time.Millisecond)
+	if _, err := s.Read(bg); !errors.Is(err, vane.ErrNotReady) {
+		t.Fatalf("Read 1 ms before the turn-on samples are past: %v, want ErrNotReady", err)
+	}
+	c.t = fixedTime.Add(settle + time.Millisecond)
+	if _, err := s.Read(bg); err != nil {
+		t.Fatalf("Read after them: %v", err)
 	}
 }
