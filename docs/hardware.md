@@ -420,6 +420,47 @@ overlay changes only what the kernel binds. WHO_AM_I (0xBD) is read first,
 `CTRL_REG1` = 0x84, and each read is one trigger, eight status polls (about
 40 ms at 5 ms) and one 5-byte output read (`W a8`).
 
+### A sample left behind is returned as new (#91)
+
+Found by the beacon spike (#46). The first reading of the day was HTS221
+25.91 °C / 74.5 %RH; every later run gave 37.9 °C / 44 %RH, with the LPS25H at
+38.4 °C throughout. `STATUS_REG` read `0x03` after each run: a sample was being
+left unread.
+
+The mechanism: with BDU on, an unread sample keeps its data-ready bits set. The
+v0.1.0 drivers triggered a one-shot without looking, so the wait returned at
+once and the **old** sample was read; the conversion just triggered finished
+afterwards and was left unread for the next `Read`. Once started, every reading
+is one conversion behind — across processes for the HTS221, whose conversion
+ends before `Close` powers it down, and within a long-running process for both.
+The Pi 5 keeps the HAT powered when halted, so the leftover survives a shutdown.
+
+Decisive test, with the HTS221's heater (never used by vane) to make the old
+sample distinguishable: leave a sample unread, heat the chip for 25 s, heater
+off, then read three times.
+
+```text
+v0.1.0:          38.07 °C   55.73 °C   53.74 °C     (the first is the pre-heat sample)
+with the fix:    56.09 °C   54.12 °C   52.87 °C     STATUS_REG 0x00 afterwards
+```
+
+The fix is in `New`, which now reads `CTRL_REG2` and the output block before
+configuring, writing nothing: a leftover sample is dropped, and a `ONE_SHOT`
+latched while powered down (it runs on power-up, see the table above) marks
+the sensor dirty, so the first `Read` lets it finish and drops it before its own
+trigger. Also checked on the board with a latched one-shot (`CTRL_REG2` 0x01,
+`STATUS_REG` 0x03 before `New`): one clean reading, both registers 0x00 after.
+`testdata/transcripts/hts221-pi5-sensehat-v2-stale-sample.txt` records the
+fixed driver on a chip prepared this way: the dropped block holds raw
+temperature 0x0392, the reads that follow about 55.9 °C.
+
+Not covered: another process using the chip at the same time (G-08). A
+conversion it triggers in the few milliseconds before `New` reads the output
+completes afterwards; the first `Read` then takes it (milliseconds old) and its
+own conversion is left unread, which restarts the one-behind chain for that
+process. Only concurrent use reaches this; a process killed mid-read leaves a
+finished sample, which the next `New` drops.
+
 ### Still not settled by this board
 
 - **An image whose kernel ships `st_pressure_i2c`:** the stock conflict G-01

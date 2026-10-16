@@ -132,7 +132,8 @@ func TestIdentificationFailsCleanly(t *testing.T) {
 
 func TestAConfigurationWriteThatFailsIsReportedAsSuch(t *testing.T) {
 	r := newRig(t)
-	r.bus.Inject(0x5C, vanetest.EIO().After(1))
+	// After the identity read and takeOver's two reads: the CTRL_REG1 write.
+	r.bus.Inject(0x5C, vanetest.EIO().After(3))
 	_, err := lps25h.New(bg, r.bus)
 	var se *vane.SensorError
 	if !errors.As(err, &se) || se.Op != "configure" || se.Reg != 0x20 || !errors.Is(err, vanetest.ErrIO) {

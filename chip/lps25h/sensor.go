@@ -73,6 +73,9 @@ func New(ctx context.Context, bus vane.Bus, opts ...Option) (*Sensor, error) {
 	if err := s.identify(ctx); err != nil {
 		return nil, err
 	}
+	if err := s.takeOver(ctx); err != nil {
+		return nil, err
+	}
 	if err := s.configure(ctx); err != nil {
 		return nil, err
 	}
@@ -132,6 +135,26 @@ func (s *Sensor) identify(ctx context.Context) error {
 // ODR is 0; in continuous mode it is the rate, in bits 6:4. SIM, RESET_AZ and
 // DIFF_EN stay clear; differential mode would change what the pressure
 // registers mean.
+// takeOver deals with what an earlier user of the chip left behind, before New
+// configures it, without writing anything (#91, seen on a Pi). An unread sample
+// keeps the data-ready bits set under BDU, so the first wait would return at
+// once with it and every later read would be one conversion behind: it is read
+// out and dropped. A ONE_SHOT latched while the chip was powered down runs as
+// soon as configure powers it up: it is marked dirty, so the first Read lets
+// it finish and drops it before triggering its own, as after a reinit. The Pi 5
+// keeps the HAT powered when halted, so both survive a shutdown.
+func (s *Sensor) takeOver(ctx context.Context) error {
+	cr2, err := s.dev.Read(ctx, regCtrl2)
+	if err != nil {
+		return s.fail("configure", regCtrl2, err)
+	}
+	s.dirty = cr2&ctrl2OneShot != 0
+	if err := s.dev.ReadBlock(ctx, regOut, s.out[:]); err != nil {
+		return s.fail("configure", regOut, err)
+	}
+	return nil
+}
+
 func (s *Sensor) configure(ctx context.Context) error {
 	ctrl1 := uint8(ctrl1PD | ctrl1BDU)
 	if s.cfg.mode.continuous {
