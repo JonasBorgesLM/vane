@@ -56,12 +56,16 @@ package vane
 type Celsius float64
 type RelativeHumidity float64 // percent; 0–100 after clamping (RF-12)
 type Hectopascal float64
+type StandardGravity float64  // g; the LSM9DS1's own unit (ADR-0008)
+type DegreesPerSecond float64 // dps
+type Gauss float64            // 1 G = 100 µT
 
 type Chip string
 
 const (
-	ChipHTS221 Chip = "HTS221"
-	ChipLPS25H Chip = "LPS25H" // LPS25H/LPS25HB family (ADR-0003)
+	ChipHTS221  Chip = "HTS221"
+	ChipLPS25H  Chip = "LPS25H"  // LPS25H/LPS25HB family (ADR-0003)
+	ChipLSM9DS1 Chip = "LSM9DS1" // one chip at 0x6A and 0x1C; Source.Address tells them apart
 )
 
 // Source identifies where a measurement came from.

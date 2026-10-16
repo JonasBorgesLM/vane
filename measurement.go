@@ -7,13 +7,15 @@ import (
 
 // Chip names a sensor chip. LPS25H stands for the register-compatible family
 // LPS25H and LPS25HB, which cannot be told apart by their identity register
-// (ADR-0003).
+// (ADR-0003). LSM9DS1 is one chip at two addresses; Source.Address tells its
+// accelerometer and gyroscope (0x6A) from its magnetometer (0x1C).
 type Chip string
 
 // The chips vane drives.
 const (
-	ChipHTS221 Chip = "HTS221"
-	ChipLPS25H Chip = "LPS25H"
+	ChipHTS221  Chip = "HTS221"
+	ChipLPS25H  Chip = "LPS25H"
+	ChipLSM9DS1 Chip = "LSM9DS1"
 )
 
 // Source identifies where a measurement came from.

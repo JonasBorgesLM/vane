@@ -368,3 +368,19 @@ func ExampleFakeBoard() {
 	// read 1: error=<nil> humidity=50 pressure ok=true
 	// read 2: error=<nil> humidity=50 pressure ok=false
 }
+
+// The Environment has no IMU reading (ADR-0008), so failing the LSM9DS1 leaves
+// a step as it was.
+func TestFailingTheIMULeavesTheEnvironmentAlone(t *testing.T) {
+	at := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	b := vanetest.NewFakeBoard(vanetest.Healthy(at, 50, 1013.25, 25, 22.5).Failing(vane.ChipLSM9DS1, vane.ErrNotPresent))
+	env, err := b.Environment(t.Context())
+	if err != nil || env.Humidity.Err != nil || env.Pressure.Err != nil {
+		t.Fatalf("err=%v humidity=%v pressure=%v, want everything valid", err, env.Humidity.Err, env.Pressure.Err)
+	}
+	for _, r := range env.Temperatures {
+		if r.Err != nil {
+			t.Fatalf("temperature from %s failed: %v", r.Source.Chip, r.Err)
+		}
+	}
+}
