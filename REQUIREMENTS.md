@@ -685,6 +685,7 @@ translates it and applies what that review decided:
 
 | Date | Change | Why |
 | --- | --- | --- |
+| 2026-10-16 | Appendix A: TCS3400 addresses and identity confirmed; the board carries a TCS34001 | Datasheet v2-00 and a read-only probe of both addresses (#52, step 0) |
 | 2026-10-16 | Roadmap after v0.1 rewritten: the IMU shipped as v0.2.0; IIO and the colour sensor unscheduled | The planned v0.2 (IIO) had no trigger under ADR-0001, so the numbering assumed a release that did not happen |
 | 2026-10-16 | Appendix A: LSM9DS1 identity confirmed; its two auto-increment schemes recorded | Read-only on the board with `vane-sense` loaded, against DocID025715 Rev 3 (#51, step 0) |
 | 2026-10-16 | Appendix A: operating ranges and LPS25H/HB averaging moved to Confirmed from the datasheets; the averaging conflict settled; overlay rows corrected to what the board shows (nodes declared, no driver bound on 6.12.62) | Datasheets read from distributor copies with document id and page; board facts from M1; detail in [docs/hardware.md](docs/hardware.md) (#17) |
@@ -713,12 +714,12 @@ translates it and applies what that review decided:
 | LPS25H: BDU and ONE_SHOT | BDU at bit 2 of CTRL_REG1; ONE_SHOT at bit 0 of CTRL_REG2; rates one-shot, 1, 7, 12.5, 25 Hz | Confirmed | ST header |
 | LPS25H: temperature | 42.5 + value / 480 (°C), 16-bit signed | Confirmed | ST `lps25hb_reg.c`; kernel `st_pressure_core.c`; [docs/hardware.md](docs/hardware.md) |
 | LPS25H: overlay | IIO node declared (`st,lps25h-press`); whether a driver binds depends on the kernel build — none on 6.12.62, whose image ships no `st_pressure` module | Confirmed | Official overlays; the board, [docs/hardware.md](docs/hardware.md) |
-| Sense HAT v2: chips | HTS221, LPS25HB, TCS3400 colour sensor | Probable (board: a device answers at 0x39; `RES_CONF` reads the LPS25HB reset value 0x0F) | Reseller listings; Raspberry Pi change notice; the board, [docs/hardware.md](docs/hardware.md) |
+| Sense HAT v2: chips | HTS221, LPS25HB, TCS3400 colour sensor | Confirmed for the TCS3400 (TCS34001 at 0x39); probable for the LPS25HB (`RES_CONF` reads its reset value 0x0F) | Reseller listings; Raspberry Pi change notice; the board, [docs/hardware.md](docs/hardware.md) |
 | Sense HAT v2: kernel support | from 2022-10-31, version 5.15.74 | Confirmed | Raspberry Pi product change notice (PCN) |
 | LSM9DS1 | accel/gyro 0x6A, magnetometer 0x1C; IIO nodes declared in the overlay, no driver bound on 6.12.62 | Confirmed | Official overlays; the board |
 | LSM9DS1: WHO_AM_I | 0x68 (accel/gyro), 0x3D (mag) | Confirmed | DocID025715 Rev 3 pp. 40, 45; the board, [docs/hardware.md](docs/hardware.md) |
 | LSM9DS1: auto-increment | accel/gyro by `CTRL_REG8.IF_ADD_INC`, **the sub-address MSB must not be set** (it reads another register); magnetometer by the MSB | Confirmed | DocID025715 Rev 3 pp. 29, 53; the board |
-| TCS3400 | 0x29 or 0x39 by variant; ID at 0x92 (0x90 or 0x93) | Probable | ams flyer; ChromiumOS driver; the official Python library probes both |
+| TCS3400 | 0x39 (TCS34001/3) or 0x29 (TCS34005/7); ID at 0x92: 0x90 (VID 00, TCS34001/5) or 0x93 (VID 11, TCS34003/7). This board: TCS34001 at 0x39, 0x29 absent | Confirmed | TCS3400 datasheet v2-00 pp. 20, 29; the board, [docs/hardware.md](docs/hardware.md) |
 | TCS3400 in the overlay | no node declared | Confirmed | v2 overlay |
 | LED/joystick microcontroller | 0x46; EEPROM write-protect register | Confirmed | Official Sense HAT documentation |
 | Pi 5: header bus | GPIO2/3 = i2c1 → `/dev/i2c-1` | Confirmed | pinout.xyz; `i2cdetect -l` on the board |
