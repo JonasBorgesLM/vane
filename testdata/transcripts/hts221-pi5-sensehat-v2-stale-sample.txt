@@ -1,0 +1,30 @@
+# vane transcript v1
+# HTS221 at 0x5f on /dev/i2c-1; scenario: New, 3 one-shot reads, Close
+# recorded 2026-10-16T14:47:31Z
+# kernel 6.12.62+rpt-rpi-2712
+# board Sense HAT, Raspberry Pi, version 0x0002
+# setup (#91), by i2cset before recording: a one-shot sample left unread (STATUS 0x03), the HEATER
+# bit on for 20 s, then off and powered down. The 'W a8' after 'W 21 R 00' is takeOver dropping that
+# sample (raw temperature 0x0392, before heating); the reads that follow are of the heated chip.
+5f W 0f R bc
+5f W b0 R 3c 8b a9 0f 00 c4 e8 ff e3 03 40 cb 00 00 a0 02
+5f W 21 R 00
+5f W a8 R 21 ee 92 03
+5f W 10 1b
+5f W 20 84
+5f W 21 01
+5f W 27 R 00
+5f W 27 R 03
+5f W a8 R ea fd 2b 07
+5f W 21 01
+5f W 27 R 00
+5f W 27 R 03
+5f W a8 R 31 fe 10 07
+5f W 21 01
+5f W 27 R 00
+5f W 27 R 03
+5f W a8 R 62 fe 01 07
+5f W 20 04
+# expect read 0: humidity 31.4944 raw -534 flags [], temperature 55.9408 raw 1835 flags []
+# expect read 1: humidity 31.2864 raw -463 flags [], temperature 55.4286 raw 1808 flags []
+# expect read 2: humidity 31.1428 raw -414 flags [], temperature 55.1440 raw 1793 flags []

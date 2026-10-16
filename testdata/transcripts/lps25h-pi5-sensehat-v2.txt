@@ -1,9 +1,11 @@
 # vane transcript v1
 # LPS25H at 0x5c on /dev/i2c-1; scenario: New, 3 one-shot reads, Close
-# recorded 2026-10-15T00:57:59Z
+# recorded 2026-10-16T14:46:50Z
 # kernel 6.12.62+rpt-rpi-2712
 # board Sense HAT, Raspberry Pi, version 0x0002
 5c W 0f R bd
+5c W 21 R 00
+5c W a8 R ff e9 39 2b f9
 5c W 20 84
 5c W 21 01
 5c W 27 R 00
@@ -14,7 +16,7 @@
 5c W 27 R 00
 5c W 27 R 00
 5c W 27 R 03
-5c W a8 R d4 0b 3a 64 f7
+5c W a8 R 49 ea 39 3e f9
 5c W 21 01
 5c W 27 R 00
 5c W 27 R 00
@@ -24,7 +26,7 @@
 5c W 27 R 00
 5c W 27 R 00
 5c W 27 R 03
-5c W a8 R 62 0c 3a 7a f7
+5c W a8 R a6 eb 39 55 f9
 5c W 21 01
 5c W 27 R 00
 5c W 27 R 00
@@ -34,8 +36,8 @@
 5c W 27 R 00
 5c W 27 R 00
 5c W 27 R 03
-5c W a8 R 4a 0d 3a 85 f7
+5c W a8 R 3f e9 39 5c f9
 5c W 20 04
-# expect read 0: pressure 928.7393 raw 3804116 flags [], temperature 37.9083 raw -2204 flags []
-# expect read 1: pressure 928.7739 raw 3804258 flags [], temperature 37.9542 raw -2182 flags []
-# expect read 2: pressure 928.8306 raw 3804490 flags [], temperature 37.9771 raw -2171 flags []
+# expect read 0: pressure 926.6428 raw 3795529 flags [], temperature 38.8958 raw -1730 flags []
+# expect read 1: pressure 926.7280 raw 3795878 flags [], temperature 38.9438 raw -1707 flags []
+# expect read 2: pressure 926.5779 raw 3795263 flags [], temperature 38.9583 raw -1700 flags []

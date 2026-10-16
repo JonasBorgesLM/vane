@@ -64,6 +64,9 @@ func New(ctx context.Context, bus vane.Bus, opts ...Option) (*Sensor, error) {
 	if err := s.calibrate(ctx); err != nil {
 		return nil, err
 	}
+	if err := s.takeOver(ctx); err != nil {
+		return nil, err
+	}
 	if err := s.configure(ctx); err != nil {
 		return nil, err
 	}
@@ -136,6 +139,26 @@ func (s *Sensor) calibrate(ctx context.Context) error {
 // (RF-06): without it a two-byte read can combine the high byte of one sample
 // with the low byte of the next. In one-shot mode ODR is 0; in continuous mode
 // it is the rate.
+// takeOver deals with what an earlier user of the chip left behind, before New
+// configures it, without writing anything (#91, seen on a Pi). An unread sample
+// keeps the data-ready bits set under BDU, so the first wait would return at
+// once with it and every later read would be one conversion behind: it is read
+// out and dropped. A ONE_SHOT latched while the chip was powered down runs as
+// soon as configure powers it up: it is marked dirty, so the first Read lets
+// it finish and drops it before triggering its own, as after a reinit. The Pi 5
+// keeps the HAT powered when halted, so both survive a shutdown.
+func (s *Sensor) takeOver(ctx context.Context) error {
+	cr2, err := s.dev.Read(ctx, regCtrl2)
+	if err != nil {
+		return s.fail("configure", regCtrl2, err)
+	}
+	s.dirty = cr2&ctrl2OneShot != 0
+	if err := s.dev.ReadBlock(ctx, regOut, s.out[:]); err != nil {
+		return s.fail("configure", regOut, err)
+	}
+	return nil
+}
+
 func (s *Sensor) configure(ctx context.Context) error {
 	if err := s.dev.Write(ctx, regAvConf, s.cfg.avg.avConf()); err != nil {
 		return s.fail("configure", regAvConf, err)

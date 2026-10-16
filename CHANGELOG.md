@@ -11,6 +11,17 @@ with no section here.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-16
+
+### Fixed
+
+- `chip/hts221`, `chip/lps25h`: a one-shot `Read` could return a sample an
+  earlier user of the chip had left unread, as if it were new, and from then on
+  every reading was one conversion behind (#91). Seen on a Pi 5: the first
+  reading of the day was 12 °C below the next. `New` now drops a leftover
+  sample and lets a `ONE_SHOT` latched while powered down finish before the
+  first trigger. It reads two registers more and writes nothing new.
+
 ## [0.1.0] - 2026-10-14
 
 **First usable version (milestones M1–M5).** Reads humidity, pressure and
