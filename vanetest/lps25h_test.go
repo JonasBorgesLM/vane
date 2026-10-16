@@ -209,17 +209,35 @@ func TestLPS25HOneShotWhilePoweredDownRunsOnPowerUp(t *testing.T) {
 	}
 }
 
-func TestLPS25HAQuantityClearsOnlyWhenAllItsBytesWereRead(t *testing.T) {
+// The high byte of an output clears its flags (DocID023722 Rev 6 p. 31,
+// DocID027112 Rev 4 p. 41; on the board, PRESS_OUT_H alone took STATUS_REG from
+// 0x03 to 0x01, and from 0x33 to 0x11 in continuous mode). Negative control: the
+// earlier model, which waited for every byte, fails the high-byte-alone half.
+func TestLPS25HAQuantityClearsWhenTheHighByteOfItsOutputIsRead(t *testing.T) {
 	l := newLPS(t)
 	l.convert()
 	l.read(0x28, 1)
 	l.read(0x29, 1)
 	if s := l.status(); s != pDA|tDA {
-		t.Fatalf("after two of three pressure bytes: status %#x, want both flags", s)
+		t.Fatalf("after PRESS_OUT_XL and _L: status %#x, want both flags", s)
 	}
 	l.read(0x2A, 1)
 	if s := l.status(); s != tDA {
-		t.Fatalf("after all three: status %#x, want only T_DA", s)
+		t.Fatalf("after PRESS_OUT_H: status %#x, want only T_DA", s)
+	}
+	l.read(0x2C, 1) // TEMP_OUT_H alone
+	if s := l.status(); s != 0 {
+		t.Fatalf("after TEMP_OUT_H alone: status %#x, want 0", s)
+	}
+}
+
+func TestLPS25HTheHighByteAloneClearsTheOverrunBit(t *testing.T) {
+	l := newLPS(t)
+	l.convert()
+	l.m.Poke(0x27, l.m.Peek(0x27)|pOR|tOR) // the chip raising them is not modelled
+	l.read(0x2A, 1)
+	if s := l.status(); s != tDA|tOR {
+		t.Fatalf("after PRESS_OUT_H alone: status %#x, want T_DA and T_OR left", s)
 	}
 }
 

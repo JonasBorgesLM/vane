@@ -68,9 +68,6 @@ type HTS221Model struct {
 	rh vane.RelativeHumidity
 	t  vane.Celsius
 
-	// readOut records which of the four output bytes were read since the last
-	// sample was latched, one bit each from HUMIDITY_OUT_L up.
-	readOut    uint8
 	converting bool // a one-shot conversion is under way
 	humPending bool // staggered: the humidity half of a conversion is still to finish
 	pending    int  // status reads still to answer "not ready"
@@ -134,7 +131,7 @@ func (m *HTS221Model) powerOn() {
 		m.regs.Set(reg, 0)
 	}
 	m.regs.Set(hRegAvConf, hAvConfDefault)
-	m.converting, m.humPending, m.pending, m.readOut = false, false, 0, 0
+	m.converting, m.humPending, m.pending = false, false, 0
 }
 
 func (m *HTS221Model) loadFactoryData() {
@@ -224,23 +221,18 @@ func (m *HTS221Model) beforeRead(reg, n int) {
 	m.complete()
 }
 
-// afterRead clears a data-ready flag once both bytes of its output have been
-// read, in one transaction or two, which is what lets the next sample replace
-// it under BDU.
+// afterRead clears a data-ready flag when the high byte of its output is read,
+// whatever else the transaction reads: HUMIDITY_OUT_H for H_DA, TEMP_OUT_H for
+// T_DA (DocID026333 Rev 4 p. 24, and observed on the board). The low byte alone
+// leaves it set. A cleared flag is what lets the next sample replace the output
+// under BDU.
 func (m *HTS221Model) afterRead(reg, n int) {
-	for i := range 4 {
-		if r := hRegHumL + i; r >= reg && r < reg+n {
-			m.readOut |= 1 << i
-		}
-	}
 	status := m.regs.Get(hRegStatus)
-	if m.readOut&0b0011 == 0b0011 {
+	if covers(reg, n, hRegHumL+1) {
 		status &^= hStatusHDA
-		m.readOut &^= 0b0011
 	}
-	if m.readOut&0b1100 == 0b1100 {
+	if covers(reg, n, hRegTempL+1) {
 		status &^= hStatusTDA
-		m.readOut &^= 0b1100
 	}
 	m.regs.Set(hRegStatus, status)
 }
@@ -305,7 +297,6 @@ func (m *HTS221Model) complete() {
 	}
 	f := hts221Factory
 	setLE16(m.regs, hRegTempL, interpolate(float64(m.t), f.T0DegC, f.T1DegC, f.T0Out, f.T1Out))
-	m.readOut = 0
 	if m.opts.staggered {
 		m.regs.Set(hRegStatus, status|hStatusTDA)
 		m.humPending = true
