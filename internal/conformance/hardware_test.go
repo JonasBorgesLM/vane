@@ -16,6 +16,7 @@ import (
 	"github.com/JonasBorgesLM/vane/chip/lps25h"
 	"github.com/JonasBorgesLM/vane/i2cdev"
 	"github.com/JonasBorgesLM/vane/internal/conformance"
+	"github.com/JonasBorgesLM/vane/internal/kernel"
 	"github.com/JonasBorgesLM/vane/sensehat"
 )
 
@@ -115,6 +116,29 @@ func TestHardwareHTS221(t *testing.T) {
 func TestHardwareLPS25H(t *testing.T) {
 	runnable(t, report(t), vane.ChipLPS25H)
 	conformance.LPS25H(t, target(t))
+}
+
+// TestHardwareLSM9DS1 checks the IMU, which Diagnose does not cover yet: the
+// kernel ownership of both its addresses is read from sysfs first, because the
+// checks write to the chip and I2C_RDWR does not stop that reaching a chip a
+// kernel driver owns (docs/hardware.md, #15).
+func TestHardwareLSM9DS1(t *testing.T) {
+	n, ok := kernel.BusNumber(busPath())
+	if !ok {
+		t.Fatalf("%s does not name an I2C adapter", busPath())
+	}
+	for _, addr := range []uint16{0x6A, 0x1C} {
+		drv, owned, err := kernel.Owner("/", n, addr)
+		switch {
+		case err != nil:
+			t.Fatalf("kernel ownership of 0x%02x: %v", addr, err)
+		case owned && os.Getenv("VANE_EXPECT") == "custom":
+			t.Fatalf("VANE_EXPECT=custom: 0x%02x is owned by %q, want it free for vane", addr, drv)
+		case owned:
+			t.Skipf("0x%02x is owned by %q: not touched", addr, drv)
+		}
+	}
+	conformance.LSM9DS1(t, target(t))
 }
 
 // TestHardwareLatency records how long a one-shot Read takes, which docs/hardware.md

@@ -596,6 +596,28 @@ FIFO_SRC 0x0b, one 36-byte burst: three distinct samples, then 0x09 (one more ar
   samples as it covers.
 - FIFO mode (stop when full) also reports `OVRN` at 32.
 
+**Conformance suite on the LSM9DS1** (`TestHardwareLSM9DS1`, `VANE_EXPECT=custom`),
+all assertions PASS on the chip and on the `vanetest` models: both identities,
+the gyroscope-then-accelerometer burst, a FIFO sample leaving on its
+accelerometer bytes (with a 12-byte burst taking out one), FIFO mode stopping at
+32 with `OVRN`, Bypass emptying the FIFO, `ZYXDA` in continuous mode. The
+observations settled the model's two assumptions and agreed with it elsewhere:
+
+| Observation | Chip | Model |
+| --- | --- | --- |
+| `STATUS_REG`, both sensors on | 0x07 | 0x03 — the chip also sets `TDA`; the model has no temperature sensor |
+| after reading `OUT_G`, then `OUT_XL` | 0x05, then 0x06 (`GDA`, then `XLDA` cleared; a new gyroscope sample arrived meanwhile) | 0x01, then 0x00 |
+| `STATUS_REG_M` after the six output bytes | 0x00 | 0x00 |
+| 24 bytes from `OUT_X_G`, both sensors off | gyroscope, then the accelerometer three times | the same |
+| FIFO samples taken out by that burst | 3 | 3 |
+| `CTRL_REG3_M` after a single conversion | 0x03 | 0x03 |
+
+With the gyroscope off, `OUT_Z_XL` wraps to `OUT_X_XL` (p. 21), so a burst longer
+than 12 bytes then takes out more samples than it reads gyroscope blocks: the
+driver's batch reads must keep the gyroscope on, or read 12 bytes at a time. Every
+register written was back at power-down afterwards (`CTRL_REG8` left at 0x44, BDU
+on, as the driver will set it).
+
 What this means for the driver (ADR-0008): the magnetometer goes through the
 existing block read; the accel/gyro block needs a block read that never sets
 the MSB, and `New` must configure every register it relies on rather than

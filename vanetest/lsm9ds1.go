@@ -91,8 +91,11 @@ type LSM9DS1AccelGyroModel struct {
 	cur  motion
 	fifo []motion
 	ovrn bool
-	// ASSUMPTION (to settle on the board): GDA clears when OUT_Z_G_H is read and
-	// XLDA when OUT_Z_XL_H is, the rule the HTS221 and LPS25H follow.
+	// GDA clears when the gyroscope outputs are read and XLDA when the
+	// accelerometer's are: seen on the board by the conformance suite, with the
+	// last byte of each block standing for "read" as on the HTS221 and LPS25H.
+	// The chip also raises TDA (bit 2) for its temperature sensor, which this
+	// model does not have.
 }
 
 var _ Device = (*LSM9DS1AccelGyroModel)(nil)
@@ -409,8 +412,8 @@ func (m *LSM9DS1MagnetometerModel) Tx(w, rd []byte) error {
 	if err := m.regs.Tx(w, rd); err != nil {
 		return err
 	}
-	// ASSUMPTION (to settle on the board): the data-ready and overrun bits clear
-	// when the last output byte, OUT_Z_H_M, is read.
+	// The data-ready and overrun bits clear once the outputs are read: seen on
+	// the board for a full six-byte read, with OUT_Z_H_M standing for it.
 	if len(rd) > 0 && covers(int(w[0]&regMask), len(rd), magOutLast) {
 		m.regs.Set(magStatus, 0)
 	}
