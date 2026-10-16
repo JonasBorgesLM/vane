@@ -530,6 +530,199 @@ own conversion is left unread, which restarts the one-behind chain for that
 process. Only concurrent use reaches this; a process killed mid-read leaves a
 finished sample, which the next `New` drops.
 
+### The LSM9DS1 on the board (#51, step 0)
+
+Read-only, on 2026-10-16, with `vane-sense` loaded (no `1-001c` or `1-006a`
+node, so no kernel driver can own either address). Datasheet DocID025715 Rev 3
+(copy at `cdn.sparkfun.com/datasheets/IoT/LSM9DS1.pdf`). Nothing was written to
+the chip.
+
+```text
+--- accel/gyro 0x6A
+WHO_AM_I        0x0F: 0x68
+WHO_AM_I via MSB 0x8F: 0x00
+CTRL_REG8       0x22: 0x04          (reset value: IF_ADD_INC on)
+burst 4 from 0x0F:     0x68 0x00 0x00 0x00
+burst 4 from 0x8F:     0x00 0x00 0x00 0x00
+--- magnetometer 0x1C
+WHO_AM_I_M      0x0F: 0x3d
+CTRL_REG1_M..5_M one by one:    0x18 0x00 0x03 0x00 0x00
+burst 5 from 0x20 (no MSB):     0x18 0x00 0x03 0x00 0x00
+burst 5 from 0xA0 (MSB):        0x18 0x00 0x03 0x00 0x00
+OUT_X_L_M..OUT_Z_H_M one by one: 0x31 0x0f 0x57 0xf5 0xfe 0x07
+burst 6 from 0x28 (no MSB):     0x31 0x0f 0x57 0xf5 0xfe 0x07
+burst 6 from 0xA8 (MSB):        0x31 0x0f 0x57 0xf5 0xfe 0x07
+```
+
+| Fact | Value | Source |
+| --- | --- | --- |
+| Accel/gyro identity | `WHO_AM_I` (0x0F) = **0x68** at 0x6A | datasheet p. 45; board |
+| Magnetometer identity | `WHO_AM_I_M` (0x0F) = **0x3D** at 0x1C | datasheet p. 40; board |
+| Accel/gyro auto-increment | by `CTRL_REG8.IF_ADD_INC` (reset 1); the sub-address carries the address only | datasheet pp. 29, 53; board: a burst from 0x0F does not repeat `WHO_AM_I` |
+| **The sub-address MSB on the accel/gyro block** | **not ignored**: 0x8F does not read `WHO_AM_I`, it reads 0x00, and a burst from it reads zeros. A block read through `regio`'s MSB helper would return plausible zeros with no error | board |
+| Magnetometer auto-increment | the sub-address MSB, as on the HTS221 and LPS25H | datasheet p. 29 |
+| The MSB on the magnetometer | a burst increments **with or without** it: control and output bursts match the registers read one by one either way | board (the datasheet says the MSB enables it) |
+| Register state at power-on | not reliable: `CTRL_REG1_M` reads 0x18, its reset value is 0x10 (p. 40), and vane never wrote it. Something configured the chip earlier, and the Pi 5 keeps the HAT powered when halted | board |
+
+**Bursts and the FIFO** (for the `vanetest` model). These needed the sensors on,
+so `CTRL_REG1_G` and `CTRL_REG6_XL` were set to 119 Hz, `CTRL_REG9`/`FIFO_CTRL`
+for the FIFO, and every register written was put back to its value before
+(0x00), checked by reading it:
+
+```text
+OUT_G one by one:   0xa2 0xfd 0x8c 0x00 0x87 0x01
+OUT_XL one by one:  0x89 0xfe 0x7c 0x39 0xf2 0xe0
+burst 12 from 0x18: 0xaa 0xfd 0x89 0x00 0x8a 0x01 0x8e 0xfe 0x6e 0x39 0xfe 0xe0
+burst 24 from 0x18: (the same 12 bytes twice)
+burst 12 from 0x28: 0x8e 0xfe 0x6e 0x39 0xfe 0xe0 0xaa 0xfd 0x89 0x00 0x8a 0x01
+--- FIFO, Continuous mode (FMODE 110)
+FIFO_SRC after 0.5 s:        0x60      32 unread, OVRN
+after one 12-byte burst:     0x1f      31, OVRN cleared
+bypass (FIFO reset):         0x00
+restarted, 50 ms:            0x06
+after 6 bytes (gyro only):   0x06
+after the 6 accel bytes:     0x05
+FIFO_SRC 0x0b, one 36-byte burst: three distinct samples, then 0x09 (one more arrived meanwhile)
+--- FIFO mode (FMODE 001): 0x60 after 0.4 s and 0.3 s later: stops at 32 and reports OVRN
+```
+
+- A burst from `OUT_X_G` reads the gyroscope, then **jumps to `OUT_X_XL`**,
+  skipping `CTRL_REG4`..`STATUS_REG` (0x1E–0x27; `CTRL_REG4` reads 0x38, so a
+  contiguous read would have shown it), and wraps back to `OUT_X_G` after
+  `OUT_Z_XL`. From `OUT_X_XL` it wraps to `OUT_X_G`. Outside the FIFO a longer
+  burst re-reads the same sample.
+- In the FIFO, **a sample leaves when its accelerometer bytes are read**, not
+  its gyroscope bytes; taking one out clears `OVRN`; one burst takes out as many
+  samples as it covers.
+- FIFO mode (stop when full) also reports `OVRN` at 32.
+
+**Conformance suite on the LSM9DS1** (`TestHardwareLSM9DS1`, `VANE_EXPECT=custom`),
+all assertions PASS on the chip and on the `vanetest` models: both identities,
+the gyroscope-then-accelerometer burst, a FIFO sample leaving on its
+accelerometer bytes (with a 12-byte burst taking out one), FIFO mode stopping at
+32 with `OVRN`, Bypass emptying the FIFO, `ZYXDA` in continuous mode. The
+observations settled the model's two assumptions and agreed with it elsewhere:
+
+| Observation | Chip | Model |
+| --- | --- | --- |
+| `STATUS_REG`, both sensors on | 0x07 | 0x03 — the chip also sets `TDA`; the model has no temperature sensor |
+| after reading `OUT_G`, then `OUT_XL` | 0x05, then 0x06 (`GDA`, then `XLDA` cleared; a new gyroscope sample arrived meanwhile) | 0x01, then 0x00 |
+| `STATUS_REG_M` after the six output bytes | 0x00 | 0x00 |
+| 24 bytes from `OUT_X_G`, both sensors off | gyroscope, then the accelerometer three times | the same |
+| FIFO samples taken out by that burst | 3 | 3 |
+| `CTRL_REG3_M` after a single conversion | 0x03 | 0x03 |
+
+With the gyroscope off, `OUT_Z_XL` wraps to `OUT_X_XL` (p. 21), so a burst longer
+than 12 bytes then takes out more samples than it reads gyroscope blocks: the
+driver's batch reads must keep the gyroscope on, or read 12 bytes at a time. Every
+register written was back at power-down afterwards (`CTRL_REG8` left at 0x44, BDU
+on, as the driver will set it).
+
+What this means for the driver (ADR-0008): the magnetometer goes through the
+existing block read; the accel/gyro block needs a block read that never sets
+the MSB, and `New` must configure every register it relies on rather than
+trust reset values.
+
+### `ReadBatch` on the board (#51, step 5)
+
+`lsm9ds1.New(…, WithFIFO(), WithRate(r))`, then `ReadBatch` into a 32-sample
+slice every `every`, 25 times, on `i2c-1` at the default 100 kHz:
+
+```text
+119.0 Hz, drained every 100ms: 333 samples in 2.89 s = 115/s (expected ~119), overruns 0, |a| 0.960..1.021 g
+952.0 Hz, drained every 20ms: 786 samples in 1.40 s = 562/s (expected ~952), overruns 24, |a| 0.866..1.646 g
+```
+
+At 119 Hz every sample arrives. At 952 Hz every batch followed an overrun, and
+|a| spread to 0.87–1.65 g. **Both first readings were wrong; step 6 below has
+the causes**: the overruns came from sleeping 20 ms between drains on top of a
+35 ms drain, not from the bus, and the spread was the chip's turn-on samples.
+
+### Turn-on samples, and the bus at 100 kHz (#51, step 6)
+
+Draining as fast as the bus allows (no sleep while a batch is 8 samples or
+more), 3 s per rate, 100 kHz, the v0.1 code of step 5:
+
+```text
+  119 Hz:    116 samples/s (97%), overruns 0, slowest ReadBatch 1.9ms,  |a| p1 1.011 p50 1.014 p99 1.020 max 1.021 g
+  238 Hz:    231 samples/s (97%), overruns 0, slowest ReadBatch 1.9ms,  |a| p1 1.012 p50 1.014 p99 1.016 max 2.365 g
+  476 Hz:    463 samples/s (97%), overruns 0, slowest ReadBatch 4ms,    |a| p1 1.011 p50 1.013 p99 1.015 max 1.647 g
+  952 Hz:    874 samples/s (92%), overruns 0, slowest ReadBatch 36.5ms, |a| p1 1.011 p50 1.014 p99 1.016 max 1.018 g
+```
+
+**The 100 kHz bus keeps up at 952 Hz** when the caller drains continuously. The
+outliers were single samples (p99 stays at 1.016 g), and printing where they
+fall put every one of them at the start of a run, with the gyroscope saturated:
+
+```text
+rate code 4 run 1: #0 |a|=1.447, #1 |a|=2.354 raw a(-9899,17842,-32764) g(-32511,32302,32414), #2 ...
+rate code 5 run 2: #2..#7, g(32763,-32768,-32768)
+rate code 6 run 0: #5..#16 |a| 0.85..1.63, g(32763,-32768,-32768)
+```
+
+These are the **turn-on samples** of DocID025715 Rev 3 Table 11 (accelerometer)
+and Table 12 (gyroscope): samples to discard after power-up. Up to 17 were wrong
+at 952 Hz and 8 at 476 Hz, more than Table 12's LPF1-only column (8, 5), within
+its LPF1-and-LPF2 column (18, 15). The driver dropped one. It now drops the
+larger column's count in `ReadBatch` (2, 13, 13, 14, 15, 18 for 14.9 to 952 Hz),
+and `Read` returns `vane.ErrNotReady` for that many periods after `New`. After
+the fix, 12 runs (3 per rate) found no outlier, and:
+
+```text
+  119 Hz:    112 samples/s (94%), overruns 0, |a| p1 1.010 p50 1.011 p99 1.013 max 1.013 g
+  238 Hz:    227 samples/s (95%), overruns 0, |a| p1 1.011 p50 1.013 p99 1.014 max 1.015 g
+  476 Hz:    459 samples/s (96%), overruns 0, |a| p1 1.011 p50 1.013 p99 1.016 max 1.017 g
+  952 Hz:    868 samples/s (91%), overruns 0, |a| p1 1.011 p50 1.014 p99 1.017 max 1.018 g
+```
+
+The shortfall from 100% is the dropped samples and the start of each 3 s run.
+At 952 Hz the slowest `ReadBatch` is 36 ms, a full FIFO; a caller that drains
+less often than every 33 ms at that rate loses samples, and is told so by
+`FlagOverrun`.
+
+### The bus at 400 kHz (#51, step 6)
+
+`dtparam=i2c_arm_baudrate=400000` added to `config.txt` (a short line right
+after `dtparam=i2c_arm=on`), after a backup; after the reboot the device tree's
+`clock-frequency` for `i2c@74000` read 400000 (100000 before), `vclog` showed
+the dtparam and `vane-sense`, and every device answered at its address. Then
+restored from the backup and rebooted: 100000 again. Results at 400 kHz:
+
+```text
+  119 Hz:    111 samples/s (94%), overruns 0, slowest ReadBatch 500µs, |a| p1 1.012 p50 1.014 p99 1.020 max 1.021 g
+  238 Hz:    225 samples/s (95%), overruns 0, slowest ReadBatch 800µs, |a| p1 0.998 p50 1.013 p99 1.026 max 1.037 g
+  476 Hz:    444 samples/s (93%), overruns 0, slowest ReadBatch 800µs, |a| p1 1.011 p50 1.013 p99 1.015 max 1.016 g
+  952 Hz:    902 samples/s (95%), overruns 0, slowest ReadBatch 1.1ms, |a| p1 1.011 p50 1.013 p99 1.016 max 1.017 g
+952.0 Hz, drained every 20ms: 614 samples in 0.69 s = 891/s, overruns 0      (24 overruns at 100 kHz)
+```
+
+The rest of the bus at 400 kHz: the hardware suite passed for the HTS221, the
+LPS25H and the LSM9DS1, one-shot latencies a little lower (HTS221 at 32/16:
+5.7 ms against 7.0 ms; LPS25H at 512/64: 37.2 ms against 40.3 ms); the LED
+matrix took an 8×8 frame and read it back; the joystick stayed registered;
+`vane-probe -require all` exited 0; no I2C error in `dmesg`. The colour sensor at
+0x39 answered `i2cdetect`; it is not driven yet, so nothing more was checked.
+
+What it means for a deployment:
+
+| Bus | 952 Hz drained continuously | 952 Hz drained every 20 ms | A full FIFO's drain |
+| --- | --- | --- | --- |
+| 100 kHz (default) | every sample | an overrun before every batch | about 35 ms, longer than the 33.6 ms the FIFO takes to fill |
+| 400 kHz | every sample | every sample | about 9 ms |
+
+At 100 kHz, 952 Hz works only for a caller that drains without pausing; any
+cadence at that rate needs 400 kHz. At 476 Hz and below, 100 kHz leaves room
+(a full FIFO lasts 67 ms or more). vane does not set the bus speed (ADR-0008).
+
+### LSM9DS1 transcripts (#51, step 6)
+
+`testdata/transcripts/lsm9ds1-pi5-read.txt` and `lsm9ds1-pi5-batch.txt`,
+recorded at 100 kHz by `TestRecordTranscript` (`chip/lsm9ds1`, `-tags
+hardware`), replayed in every `go test`. They show both identities read before
+any write, `CTRL_REG8` = 0x44 before any block read, the bare sub-address
+(`W 18`) on 0x6A and the MSB on 0x1C, and in the batch one the turn-on samples
+dropped: 11 held after 100 ms, all dropped, then 2 more dropped and 11 returned.
+
 ### Still not settled by this board
 
 - **An image whose kernel ships `st_pressure_i2c`:** the stock conflict G-01

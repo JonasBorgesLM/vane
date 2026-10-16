@@ -11,6 +11,37 @@ with no section here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-16
+
+**The IMU (#51, ADR-0008).** The Sense HAT's LSM9DS1 is read by its own driver,
+checked on a Pi 5 at 100 and 400 kHz.
+
+### Added
+
+- `chip/lsm9ds1`: the Sense HAT's IMU (ADR-0008). `New` identifies the
+  accelerometer/gyroscope (0x6A) and the magnetometer (0x1C) separately and
+  keeps either working if the other fails; `Read` returns acceleration and
+  angular rate, `ReadMagnetic` the magnetic field, in g, dps and gauss, with
+  rate and full-scale options. `WithFIFO` and `ReadBatch` drain the chip's
+  32-sample FIFO, every sample oldest first, with overruns flagged.
+- `vane`: `StandardGravity`, `DegreesPerSecond`, `Gauss` and `ChipLSM9DS1`.
+- `internal/regio`: a second auto-increment scheme for devices that increment
+  by a register bit (#104).
+- `vanetest`: register models of the LSM9DS1's two devices, checked against the
+  chip by the conformance suite.
+- Transcripts of the LSM9DS1 recorded on the Pi, replayed in every `go test`;
+  README guidance on the I2C bus speed for high rates.
+
+### Known limitations
+
+- `sensehat` does not read the IMU yet: use `chip/lsm9ds1` directly.
+- For the chip's turn-on samples after `New` (13 periods at the default
+  119 Hz, about 110 ms) `Read` returns `vane.ErrNotReady`; `ReadBatch` drops them.
+- `ReadBatch` leaves the pace to the caller: at 952 Hz on the default 100 kHz
+  bus, only a caller draining without pause keeps every sample; with pauses,
+  the bus needs 400 kHz, which vane does not set (`FlagOverrun` reports a loss).
+- The chip's temperature sensor is not read.
+
 ## [0.1.2] - 2026-10-16
 
 ### Added

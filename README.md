@@ -10,8 +10,8 @@ Part of a small ecosystem of Go projects (moat, bastion, cistern, crier, cairn,
 sapper, warden, usher). The name comes from the weather vane on top of a tower:
 the instrument that read the environment.
 
-> **Status: v0.1.2.** Both drivers, the board API, the test fakes and
-> `vane-probe` work and are tested on a Pi 5.
+> **Status: v0.2.0.** The HTS221, LPS25H and LSM9DS1 drivers, the board API, the
+> test fakes and `vane-probe` work and are tested on a Pi 5.
 > Progress is on the [project board](https://github.com/users/JonasBorgesLM/projects/8).
 
 ## What it does
@@ -52,7 +52,8 @@ for _, t := range env.Temperatures {         // one per chip, HTS221 first, unco
   On a Pi 5 in a case the HAT reads about 37 °C at room temperature.
 - Retry, cache, serialise or transport readings — that is the consumer's job.
 - Log. Errors carry chip, address, register and operation instead.
-- Drive the IMU, the colour sensor, the LED matrix or the joystick — not in v0.1.
+- Drive the colour sensor, the LED matrix or the joystick — not yet. The IMU is
+  `chip/lsm9ds1` since v0.2, outside the `sensehat` facade for now.
 - Coordinate with another process using the same chips: serialisation is per
   process.
 
@@ -102,7 +103,7 @@ The `vane-sense` overlay disables those nodes so no driver can bind, and keeps
 the LED matrix and the joystick working:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/JonasBorgesLM/vane/v0.1.2/overlays/vane-sense.dts
+curl -fsSLO https://raw.githubusercontent.com/JonasBorgesLM/vane/v0.2.0/overlays/vane-sense.dts
 dtc -@ -I dts -O dtb -o vane-sense.dtbo vane-sense.dts
 sudo cp vane-sense.dtbo /boot/firmware/overlays/
 grep -qx 'dtoverlay=vane-sense' /boot/firmware/config.txt || echo 'dtoverlay=vane-sense' | sudo tee -a /boot/firmware/config.txt
@@ -128,7 +129,7 @@ over:
 
 ```sh
 # on your computer
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go install github.com/JonasBorgesLM/vane/cmd/vane-probe@v0.1.2
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go install github.com/JonasBorgesLM/vane/cmd/vane-probe@v0.2.0
 scp "$(go env GOPATH)/bin/linux_arm64/vane-probe" pi@raspberrypi.local:
 ```
 
@@ -136,7 +137,7 @@ A cross-compiled `go install` puts the binary under `bin/linux_arm64/`, not
 `bin/`.
 
 With Go 1.26 or newer on the Pi itself, `go install
-github.com/JonasBorgesLM/vane/cmd/vane-probe@v0.1.2` does the same. Then, on
+github.com/JonasBorgesLM/vane/cmd/vane-probe@v0.2.0` does the same. Then, on
 the Pi:
 
 ```sh
@@ -204,6 +205,26 @@ detail in [`docs/hardware.md`](docs/hardware.md)):
 The driver polls the status register every 5 ms (`WithPollInterval`), so these
 figures are the conversion time rounded up to that step plus the bus traffic,
 not the chip's conversion time alone.
+
+## The IMU and the bus speed
+
+`chip/lsm9ds1` reads the accelerometer, gyroscope and magnetometer, and with
+`WithFIFO` drains every sample of the chip's 32-sample FIFO through `ReadBatch`.
+Measured on the Pi 5 (detail in [`docs/hardware.md`](docs/hardware.md)):
+
+| Rate | 100 kHz bus (default) | 400 kHz bus |
+| --- | --- | --- |
+| 119 to 476 Hz, drained continuously | every sample | every sample |
+| 952 Hz, drained continuously | every sample | every sample |
+| 952 Hz, drained every 20 ms | an overrun before every batch | every sample |
+
+The FIFO holds 32 samples, 33.6 ms at 952 Hz, and a full drain takes about
+35 ms at 100 kHz and 9 ms at 400 kHz: a caller that pauses between drains must
+restart before the FIFO fills, counting the drain itself. `FlagOverrun` says
+when it did not. For 952 Hz with a pause between drains, add
+`dtparam=i2c_arm_baudrate=400000`
+to `/boot/firmware/config.txt` (a short line) and reboot. Every chip on the HAT
+was checked at 400 kHz. vane never sets the bus speed itself.
 
 ## Requirements
 

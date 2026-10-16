@@ -681,6 +681,7 @@ translates it and applies what that review decided:
 
 | Date | Change | Why |
 | --- | --- | --- |
+| 2026-10-16 | Appendix A: LSM9DS1 identity confirmed; its two auto-increment schemes recorded | Read-only on the board with `vane-sense` loaded, against DocID025715 Rev 3 (#51, step 0) |
 | 2026-10-16 | Appendix A: operating ranges and LPS25H/HB averaging moved to Confirmed from the datasheets; the averaging conflict settled; overlay rows corrected to what the board shows (nodes declared, no driver bound on 6.12.62) | Datasheets read from distributor copies with document id and page; board facts from M1; detail in [docs/hardware.md](docs/hardware.md) (#17) |
 | 2026-10-12 | Appendix A: LPS25H temperature formula, pressure sign, LPS25HB identity and the auto-increment bit moved to Confirmed; averaging sample counts recorded as a conflict between sources | Same method as the HTS221 row; detail in [docs/hardware.md](docs/hardware.md) (#17, partly) |
 | 2026-10-12 | Appendix A: HTS221 data, calibration and the auto-increment bit moved to Confirmed | Read from the kernel driver and ST's reference header, not from memory; detail in [docs/hardware.md](docs/hardware.md) (#17, partly) |
@@ -710,7 +711,8 @@ translates it and applies what that review decided:
 | Sense HAT v2: chips | HTS221, LPS25HB, TCS3400 colour sensor | Probable (board: a device answers at 0x39; `RES_CONF` reads the LPS25HB reset value 0x0F) | Reseller listings; Raspberry Pi change notice; the board, [docs/hardware.md](docs/hardware.md) |
 | Sense HAT v2: kernel support | from 2022-10-31, version 5.15.74 | Confirmed | Raspberry Pi product change notice (PCN) |
 | LSM9DS1 | accel/gyro 0x6A, magnetometer 0x1C; IIO nodes declared in the overlay, no driver bound on 6.12.62 | Confirmed | Official overlays; the board |
-| LSM9DS1: WHO_AM_I | 0x68 (accel/gyro), 0x3D (mag) | To confirm | Memory |
+| LSM9DS1: WHO_AM_I | 0x68 (accel/gyro), 0x3D (mag) | Confirmed | DocID025715 Rev 3 pp. 40, 45; the board, [docs/hardware.md](docs/hardware.md) |
+| LSM9DS1: auto-increment | accel/gyro by `CTRL_REG8.IF_ADD_INC`, **the sub-address MSB must not be set** (it reads another register); magnetometer by the MSB | Confirmed | DocID025715 Rev 3 pp. 29, 53; the board |
 | TCS3400 | 0x29 or 0x39 by variant; ID at 0x92 (0x90 or 0x93) | Probable | ams flyer; ChromiumOS driver; the official Python library probes both |
 | TCS3400 in the overlay | no node declared | Confirmed | v2 overlay |
 | LED/joystick microcontroller | 0x46; EEPROM write-protect register | Confirmed | Official Sense HAT documentation |

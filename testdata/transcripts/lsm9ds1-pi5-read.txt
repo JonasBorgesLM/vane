@@ -1,0 +1,33 @@
+# vane transcript v1
+# scenario read
+# LSM9DS1 at 0x6a and 0x1c on /dev/i2c-1
+# recorded 2026-10-16T19:47:48Z
+# kernel 6.12.62+rpt-rpi-2712
+# board Sense HAT, Raspberry Pi, version 0x0002
+6a W 0f R 68
+6a W 22 44
+6a W 2e 00
+6a W 23 00
+6a W 2e 00
+6a W 20 60
+6a W 10 60
+1c W 0f R 3d
+1c W 24 40
+1c W 21 00
+1c W 20 10
+1c W 22 00
+6a W 27 R 07
+6a W 18 R c0 fd 8c 00 94 01 86 fe 63 39 f2 e0
+1c W 27 R ff
+1c W a8 R 21 09 15 fd 25 07
+6a W 27 R 07
+6a W 18 R 95 fd 8f 00 9e 01 74 fe 67 39 22 e1
+1c W 27 R ff
+1c W a8 R 3f 09 0f fd 40 07
+6a W 10 00
+6a W 20 00
+1c W 22 03
+# expect read 0: gyro raw -576 140 404 value -5.04000 1.22500 3.53500 flags [][][] accel raw -378 14691 -7950 value -0.02306 0.89615 -0.48495 flags [][][]
+# expect magnetic 0: raw 2337 -747 1829 value 0.32718 -0.10458 0.25606 flags [overrun][overrun][overrun]
+# expect read 1: gyro raw -619 143 414 value -5.41625 1.25125 3.62250 flags [][][] accel raw -396 14695 -7902 value -0.02416 0.89639 -0.48202 flags [][][]
+# expect magnetic 1: raw 2367 -753 1856 value 0.33138 -0.10542 0.25984 flags [overrun][overrun][overrun]

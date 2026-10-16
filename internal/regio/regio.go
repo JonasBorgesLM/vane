@@ -1,10 +1,18 @@
 // Package regio reads and writes the 8-bit registers of the ST MEMS sensors on
-// the Sense HAT (HTS221, LPS25H/LPS25HB) over a vane.Bus.
+// the Sense HAT over a vane.Bus.
 //
-// It is the only place that builds a register sub-address. ST chips return the
-// same register n times for an n-byte read unless the most significant bit of
-// the sub-address is set to auto-increment it, and the values still look
-// plausible, so that bit is set here, in one place, by ReadBlock (G-13).
+// It is the only place that builds a register sub-address. A multi-byte read
+// that does not auto-increment returns the same register n times, and the
+// values still look plausible (G-13), so how a device increments is fixed when
+// its Dev is made, never per call. The ST chips use one of two schemes:
+//
+//   - New: the sub-address MSB requests it (HTS221, LPS25H/HB, the LSM9DS1
+//     magnetometer). ReadBlock sets that bit.
+//   - NewIncrementByRegister: a register bit enables it, and a sub-address
+//     with the MSB set is a different register (the LSM9DS1 accelerometer and
+//     gyroscope, CTRL_REG8.IF_ADD_INC; on the board, 0x8F read 0x00 instead of
+//     WHO_AM_I). ReadBlock sends the bare address, and the driver keeps the
+//     register bit set.
 package regio
 
 import (
@@ -33,11 +41,21 @@ const (
 type Dev struct {
 	bus  vane.Bus
 	addr uint16
+	inc  uint8 // OR-ed into the sub-address of a block read
 	buf  [2]byte
 }
 
-// New returns a Dev for the device at addr on bus.
+// New returns a Dev for a device whose sub-address MSB requests auto-increment.
 func New(bus vane.Bus, addr uint16) *Dev {
+	return &Dev{bus: bus, addr: addr, inc: autoIncrement}
+}
+
+// NewIncrementByRegister returns a Dev for a device whose auto-increment is
+// enabled by a register bit, such as the LSM9DS1 accelerometer and gyroscope
+// (CTRL_REG8.IF_ADD_INC). Its block reads never set the sub-address MSB. The
+// driver must keep the device's increment bit set, or a block read returns one
+// register repeated.
+func NewIncrementByRegister(bus vane.Bus, addr uint16) *Dev {
 	return &Dev{bus: bus, addr: addr}
 }
 
@@ -63,7 +81,7 @@ func (d *Dev) Write(ctx context.Context, reg, val uint8) error {
 }
 
 // ReadBlock fills dst with len(dst) consecutive registers starting at reg, in
-// one transaction, setting the auto-increment bit.
+// one transaction, incrementing as the Dev's scheme says.
 func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error {
 	if err := checkRegister(reg); err != nil {
 		return err
@@ -71,7 +89,7 @@ func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error {
 	if len(dst) == 0 {
 		return fmt.Errorf("regio: empty block read at register 0x%02x", reg)
 	}
-	d.buf[0] = reg | autoIncrement
+	d.buf[0] = reg | d.inc
 	return d.bus.Tx(ctx, d.addr, d.buf[:1], dst)
 }
 

@@ -56,12 +56,16 @@ package vane
 type Celsius float64
 type RelativeHumidity float64 // percent; 0–100 after clamping (RF-12)
 type Hectopascal float64
+type StandardGravity float64  // g; the LSM9DS1's own unit (ADR-0008)
+type DegreesPerSecond float64 // dps
+type Gauss float64            // 1 G = 100 µT
 
 type Chip string
 
 const (
-	ChipHTS221 Chip = "HTS221"
-	ChipLPS25H Chip = "LPS25H" // LPS25H/LPS25HB family (ADR-0003)
+	ChipHTS221  Chip = "HTS221"
+	ChipLPS25H  Chip = "LPS25H"  // LPS25H/LPS25HB family (ADR-0003)
+	ChipLSM9DS1 Chip = "LSM9DS1" // one chip at 0x6A and 0x1C; Source.Address tells them apart
 )
 
 // Source identifies where a measurement came from.
@@ -248,6 +252,47 @@ The two drivers repeat the same recovery, settle and close logic. Two copies
 cost less than a shared engine that would need a callback for every difference
 (status bits, output length, configuration, conversion); a third chip would
 change that.
+
+**LSM9DS1** (`chip/lsm9ds1`, ADR-0008) is implemented: `New`, `Read`,
+`ReadMagnetic`, `ReadBatch` and `Close`. It shares
+nothing with the two drivers above: the chip has no one-shot, so there is no
+trigger, wait or settle to repeat.
+
+```go
+type Vector3[T ~float64] struct{ X, Y, Z vane.Measurement[T] } // each axis a full measurement
+type Motion struct {
+	Acceleration Vector3[vane.StandardGravity]
+	AngularRate  Vector3[vane.DegreesPerSecond]
+}
+
+func New(ctx context.Context, bus vane.Bus, opts ...Option) (*Sensor, error) // fails only if neither device identifies
+func (s *Sensor) Read(ctx context.Context) (Motion, error)                      // latest accel+gyro sample
+func (s *Sensor) ReadMagnetic(ctx context.Context) (Vector3[vane.Gauss], error) // latest magnetometer sample
+func (s *Sensor) ReadBatch(ctx context.Context, dst []Motion) (int, error)      // WithFIFO: every sample, oldest first
+func (s *Sensor) Close(ctx context.Context) error
+
+// Options: WithRate (14.9–952 Hz, accel and gyro together), WithAccelRange
+// (2/4/8/16 g), WithGyroRange (245/500/2000 dps), WithMagRange (4/8/12/16
+// gauss), WithAccelGyroAddress, WithMagnetometerAddress, WithBusName, WithClock.
+```
+
+- **Two devices, two errors.** Each is identified before it is written; one
+  that does not identify is never written and its reads return the error.
+- **Two increment schemes**: `regio.NewIncrementByRegister` for 0x6A (with
+  `CTRL_REG8.IF_ADD_INC` set first), `regio.New` for 0x1C (ADR-0008).
+- **Configuration is written in full**, never trusted from reset values; BDU on
+  in both devices; the FIFO in Bypass, so `Read` returns the latest sample.
+- **Flags**: `FlagStale` from `GDA`/`XLDA`/`ZYXDA`; `FlagOverrun` from
+  `ZYXOR` on the magnetometer; `FlagClamped` on an axis at ±32767/−32768, where
+  the chip saturates.
+- **The FIFO mode is chosen in `New`** (`WithFIFO`): Bypass for `Read`, which
+  wants the latest sample, Continuous for `ReadBatch`, which drains every sample
+  oldest first. The other method returns `ErrWrongMode` without touching the
+  bus. `ReadBatch` reads whole 12-byte samples, at most 8 per transaction,
+  drops the first sample after entering FIFO mode (p. 23), flags the first
+  sample after an `OVRN` with `FlagOverrun`, and stamps samples one rate period
+  apart, the last at the read of `FIFO_SRC`. `Close` powers the sensors down
+  and leaves the FIFO registers; the next `New` writes Bypass before anything.
 
 ### What a driver must not do
 
@@ -509,11 +554,13 @@ package regio // register access for ST chips (G-13)
 // Dev owns a scratch buffer so reads allocate nothing (RNF-08): a buffer local
 // to a function escapes through the Bus interface (measured, 2 allocs/op).
 // Not safe for concurrent use; the driver's per-chip mutex covers it (ADR-0004).
-type Dev struct{ /* bus, addr, buf [2]byte */ }
-func New(b vane.Bus, addr uint16) *Dev
+type Dev struct{ /* bus, addr, increment scheme, buf [2]byte */ }
+// The increment scheme is fixed per device, never per call (ADR-0008):
+func New(b vane.Bus, addr uint16) *Dev                    // sub-address MSB: HTS221, LPS25H/HB, LSM9DS1 magnetometer
+func NewIncrementByRegister(b vane.Bus, addr uint16) *Dev // a register bit: LSM9DS1 accel/gyro (CTRL_REG8.IF_ADD_INC)
 func (d *Dev) Read(ctx context.Context, reg uint8) (uint8, error)
 func (d *Dev) Write(ctx context.Context, reg, val uint8) error
-func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error // sets 0x80; the only place that does
+func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error // sets 0x80 only under New; the only place that builds a block sub-address
 
 package poll // data-ready wait (RNF-05)
 type Clock interface { Now() time.Time; Sleep(ctx context.Context, d time.Duration) error }

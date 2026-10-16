@@ -1,0 +1,59 @@
+# vane transcript v1
+# scenario batch
+# LSM9DS1 at 0x6a and 0x1c on /dev/i2c-1
+# recorded 2026-10-16T19:47:48Z
+# kernel 6.12.62+rpt-rpi-2712
+# board Sense HAT, Raspberry Pi, version 0x0002
+6a W 0f R 68
+6a W 22 44
+6a W 2e 00
+6a W 23 02
+6a W 2e c0
+6a W 20 60
+6a W 10 60
+1c W 0f R 3d
+1c W 24 40
+1c W 21 00
+1c W 20 10
+1c W 22 00
+6a W 2f R 0b
+6a W 18 R 0a c6 d1 1a 8a 19 e0 fe aa 33 46 e4 4a 80 48 6f 02 72 c4 fd 26 39 22 df 45 dc 91 20 c3 22 41 fe 5f 36 89 e2 46 f4 49 08 2b 0b 6c fe 3a 39 77 e1 4e 03 0b ff 1d 00 84 fe 67 39 5f e1 4e 02 70 ff 31 00 83 fe 71 39 50 e1 45 ff 30 00 14 01 81 fe 6a 39 44 e1 12 fe 7a 00 79 01 8b fe 6c 39 4b e1
+6a W 18 R c0 fd 99 00 8a 01 77 fe 75 39 4e e1 ac fd 96 00 9e 01 7c fe 6e 39 56 e1 98 fd 93 00 a8 01 77 fe 6b 39 57 e1
+6a W 2f R 0d
+6a W 18 R 9f fd 90 00 a2 01 8b fe 70 39 65 e1 a9 fd 8c 00 9d 01 80 fe 75 39 58 e1
+6a W 18 R a2 fd 8d 00 8f 01 7c fe 6d 39 5d e1 93 fd 8d 00 98 01 83 fe 7b 39 52 e1 b3 fd 8e 00 99 01 79 fe 60 39 4e e1 b6 fd 87 00 8a 01 83 fe 6c 39 57 e1 b2 fd 83 00 8e 01 83 fe 6b 39 5d e1 b0 fd 8f 00 94 01 7b fe 71 39 65 e1 a7 fd 86 00 92 01 7c fe 64 39 6a e1 a2 fd 96 00 93 01 83 fe 78 39 65 e1
+6a W 18 R 9a fd 9a 00 95 01 7b fe 71 39 63 e1 b1 fd 89 00 94 01 78 fe 73 39 60 e1 a8 fd 87 00 8f 01 82 fe 77 39 5b e1
+6a W 2f R 0e
+6a W 18 R a2 fd 87 00 95 01 71 fe 76 39 63 e1 a4 fd 8a 00 96 01 83 fe 76 39 6e e1 9a fd 8d 00 95 01 70 fe 72 39 67 e1 a1 fd 8d 00 96 01 7f fe 6f 39 6b e1 9d fd 8f 00 91 01 7e fe 78 39 5b e1 9d fd 93 00 96 01 85 fe 70 39 64 e1 95 fd 91 00 9a 01 83 fe 6b 39 62 e1 a5 fd 8d 00 9c 01 89 fe 70 39 5e e1
+6a W 18 R a4 fd 88 00 9e 01 80 fe 6f 39 6d e1 9e fd 91 00 9c 01 85 fe 77 39 6f e1 a7 fd 8e 00 92 01 8a fe 6f 39 76 e1 b1 fd 8f 00 8f 01 85 fe 79 39 78 e1 a9 fd 8b 00 9a 01 7a fe 71 39 7b e1 96 fd 8d 00 9a 01 85 fe 73 39 71 e1
+6a W 10 00
+6a W 20 00
+1c W 22 03
+# expect batch 0: 0 samples
+# expect batch 1: 11 samples
+# expect batch 1 sample 0: gyro raw -606 141 399 value -5.30250 1.23375 3.49125 flags [][][] accel raw -388 14701 -7843 value -0.02367 0.89676 -0.47842 flags [][][]
+# expect batch 1 sample 1: gyro raw -621 141 408 value -5.43375 1.23375 3.57000 flags [][][] accel raw -381 14715 -7854 value -0.02324 0.89761 -0.47909 flags [][][]
+# expect batch 1 sample 2: gyro raw -589 142 409 value -5.15375 1.24250 3.57875 flags [][][] accel raw -391 14688 -7858 value -0.02385 0.89597 -0.47934 flags [][][]
+# expect batch 1 sample 3: gyro raw -586 135 394 value -5.12750 1.18125 3.44750 flags [][][] accel raw -381 14700 -7849 value -0.02324 0.89670 -0.47879 flags [][][]
+# expect batch 1 sample 4: gyro raw -590 131 398 value -5.16250 1.14625 3.48250 flags [][][] accel raw -381 14699 -7843 value -0.02324 0.89664 -0.47842 flags [][][]
+# expect batch 1 sample 5: gyro raw -592 143 404 value -5.18000 1.25125 3.53500 flags [][][] accel raw -389 14705 -7835 value -0.02373 0.89700 -0.47793 flags [][][]
+# expect batch 1 sample 6: gyro raw -601 134 402 value -5.25875 1.17250 3.51750 flags [][][] accel raw -388 14692 -7830 value -0.02367 0.89621 -0.47763 flags [][][]
+# expect batch 1 sample 7: gyro raw -606 150 403 value -5.30250 1.31250 3.52625 flags [][][] accel raw -381 14712 -7835 value -0.02324 0.89743 -0.47793 flags [][][]
+# expect batch 1 sample 8: gyro raw -614 154 405 value -5.37250 1.34750 3.54375 flags [][][] accel raw -389 14705 -7837 value -0.02373 0.89700 -0.47806 flags [][][]
+# expect batch 1 sample 9: gyro raw -591 137 404 value -5.17125 1.19875 3.53500 flags [][][] accel raw -392 14707 -7840 value -0.02391 0.89713 -0.47824 flags [][][]
+# expect batch 1 sample 10: gyro raw -600 135 399 value -5.25000 1.18125 3.49125 flags [][][] accel raw -382 14711 -7845 value -0.02330 0.89737 -0.47854 flags [][][]
+# expect batch 2: 14 samples
+# expect batch 2 sample 0: gyro raw -606 135 405 value -5.30250 1.18125 3.54375 flags [][][] accel raw -399 14710 -7837 value -0.02434 0.89731 -0.47806 flags [][][]
+# expect batch 2 sample 1: gyro raw -604 138 406 value -5.28500 1.20750 3.55250 flags [][][] accel raw -381 14710 -7826 value -0.02324 0.89731 -0.47739 flags [][][]
+# expect batch 2 sample 2: gyro raw -614 141 405 value -5.37250 1.23375 3.54375 flags [][][] accel raw -400 14706 -7833 value -0.02440 0.89707 -0.47781 flags [][][]
+# expect batch 2 sample 3: gyro raw -607 141 406 value -5.31125 1.23375 3.55250 flags [][][] accel raw -385 14703 -7829 value -0.02348 0.89688 -0.47757 flags [][][]
+# expect batch 2 sample 4: gyro raw -611 143 401 value -5.34625 1.25125 3.50875 flags [][][] accel raw -386 14712 -7845 value -0.02355 0.89743 -0.47854 flags [][][]
+# expect batch 2 sample 5: gyro raw -611 147 406 value -5.34625 1.28625 3.55250 flags [][][] accel raw -379 14704 -7836 value -0.02312 0.89694 -0.47800 flags [][][]
+# expect batch 2 sample 6: gyro raw -619 145 410 value -5.41625 1.26875 3.58750 flags [][][] accel raw -381 14699 -7838 value -0.02324 0.89664 -0.47812 flags [][][]
+# expect batch 2 sample 7: gyro raw -603 141 412 value -5.27625 1.23375 3.60500 flags [][][] accel raw -375 14704 -7842 value -0.02287 0.89694 -0.47836 flags [][][]
+# expect batch 2 sample 8: gyro raw -604 136 414 value -5.28500 1.19000 3.62250 flags [][][] accel raw -384 14703 -7827 value -0.02342 0.89688 -0.47745 flags [][][]
+# expect batch 2 sample 9: gyro raw -610 145 412 value -5.33750 1.26875 3.60500 flags [][][] accel raw -379 14711 -7825 value -0.02312 0.89737 -0.47732 flags [][][]
+# expect batch 2 sample 10: gyro raw -601 142 402 value -5.25875 1.24250 3.51750 flags [][][] accel raw -374 14703 -7818 value -0.02281 0.89688 -0.47690 flags [][][]
+# expect batch 2 sample 11: gyro raw -591 143 399 value -5.17125 1.25125 3.49125 flags [][][] accel raw -379 14713 -7816 value -0.02312 0.89749 -0.47678 flags [][][]
+# expect batch 2 sample 12: gyro raw -599 139 410 value -5.24125 1.21625 3.58750 flags [][][] accel raw -390 14705 -7813 value -0.02379 0.89700 -0.47659 flags [][][]
+# expect batch 2 sample 13: gyro raw -618 141 410 value -5.40750 1.23375 3.58750 flags [][][] accel raw -379 14707 -7823 value -0.02312 0.89713 -0.47720 flags [][][]

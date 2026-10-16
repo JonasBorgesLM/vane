@@ -3,7 +3,7 @@
 Guidance for Claude Code in this repository. The general engineering rules are
 in `~/.claude/CLAUDE.md`; this file carries only what is true of vane.
 
-**Status: v0.1.2 released.** The root package, `i2cdev`, both drivers,
+**Status: v0.2.0 released.** The root package, `i2cdev`, the three drivers,
 `sensehat`, `vanetest` and `cmd/vane-probe` exist, are tested and were checked
 on a Pi 5; what remains open is on the issue tracker. `REQUIREMENTS.md` and
 `docs/architecture.md` are the plan the code is checked against.
@@ -20,7 +20,7 @@ the beacon edge agent, through its own `SensorReader` port.
 - Compensating temperature for CPU heat, dew point, or any derived quantity.
 - Retry, circuit breaking, caching — the consumer's job (bastion, cistern).
 - Serialisation, transport, or any knowledge of beacon.
-- IMU, colour sensor, LED matrix, joystick — not in v0.1.
+- Colour sensor, LED matrix, joystick — not yet (the IMU is `chip/lsm9ds1`, v0.2).
 - Logging. vane has no logger and must not import crier or OpenTelemetry.
 
 ## Architecture
@@ -30,6 +30,7 @@ import cycle on the first `go build`):
 
 ```
 sensehat ──▶ chip/hts221, chip/lps25h ──▶ vane (leaf) ◀── i2cdev, vanetest
+             chip/lsm9ds1 (not in sensehat yet, ADR-0008) ──▶ vane
                          └──────▶ internal/*
 ```
 
@@ -98,7 +99,10 @@ check. Release is `.github/workflows/release.yml`, driven by `RELEASING.md`.
    both parties.
 3. **BDU is on in every configuration path** (RF-06). Without it a multi-byte
    read can mix the high byte of one sample with the low byte of the next.
-4. **Multi-byte reads on ST chips go through the one block-read helper** that
-   sets the auto-increment bit. Without it the chip returns the same register n
-   times and the values still look plausible.
+4. **Multi-byte reads go through `regio.ReadBlock`, on a `Dev` made for the
+   device's increment scheme** (ADR-0008). `regio.New` sets the sub-address MSB
+   (HTS221, LPS25H/HB, LSM9DS1 magnetometer); `regio.NewIncrementByRegister`
+   never does (LSM9DS1 accel/gyro, whose MSB addresses another register).
+   The wrong scheme returns one register repeated, or zeros, and the values
+   still look plausible.
 5. **No panic in a normal path; no global state; no `init()` registration.**

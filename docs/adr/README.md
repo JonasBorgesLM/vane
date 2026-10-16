@@ -22,6 +22,7 @@ named `0000-` so it does not read as a decision or trip the index check.
 | [`0005`](0005-one-shot-default.md) | One-shot is the default acquisition mode; BDU is always on | Accepted | — |
 | [`0006`](0006-errors-and-partial-failure.md) | Sentinels plus typed wrappers; failure per sensor, whole-call failure only when nothing worked | Accepted | — |
 | [`0007`](0007-write-allowlist-in-tests.md) | Writes restricted to datasheet-writable registers, enforced by the test models, not at runtime | Accepted | — |
+| [`0008`](0008-imu-batch-reads-from-the-fifo.md) | The LSM9DS1 is read in batches drained from its FIFO by the caller, through one driver for both addresses; no goroutine streams it | Accepted | — |
 
 Each row links its file, so the index is navigable and the
 `check-docs.sh` cross-check can verify both directions.
@@ -40,6 +41,7 @@ never.
 | `0006` | A consumer needs a failure mode it can only express by parsing messages |
 | `0007` | A third-party driver is accepted, or a recorded transcript shows a write a model rejects |
 | `0001` | A consumer cannot change `config.txt` and the kernel binds the LPS25H; a stock kernel ships `st_pressure_i2c`; a driver bound after `Open` is reported |
+| `0008` | A consumer needs the magnetometer at FIFO rate; `ReadBatch` cannot reach a needed rate at either bus speed; a second consumer writes the same streaming loop |
 
 ## Open questions
 
