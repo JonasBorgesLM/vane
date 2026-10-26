@@ -24,3 +24,8 @@ type DegreesPerSecond float64
 // Gauss is a magnetic flux density in gauss (1 G = 100 µT), the unit of the
 // LSM9DS1 magnetometer's full scales.
 type Gauss float64
+
+// Counts is a raw ADC count, dimensionless: what a sensor such as the TCS3400
+// produced, before any conversion. Its meaning depends on the gain and
+// integration time it was taken with, which travel with it (ADR-0009).
+type Counts float64

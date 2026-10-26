@@ -11,6 +11,18 @@ with no section here.
 
 ## [Unreleased]
 
+### Added
+
+- `chip/tcs3400`: the Sense HAT v2's colour sensor (ADR-0009). One integration
+  per `Read`, clear/red/green/blue as raw counts (`vane.Counts`) with the gain
+  and integration time they were taken with; saturation flagged; a chip reset
+  detected and the configuration rewritten. `Variant` and `Part` from the ID
+  register and the address.
+- `vane`: `Counts` and `ChipTCS3400`.
+- `internal/regio`: a third register scheme, byte-addressed (0x80–0xFF).
+- `vanetest`: a TCS3400 register model, with conformance checks for the model
+  and the chip.
+
 ## [0.2.0] - 2026-10-16
 
 **The IMU (#51, ADR-0008).** The Sense HAT's LSM9DS1 is read by its own driver,

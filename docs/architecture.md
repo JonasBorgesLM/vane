@@ -294,6 +294,31 @@ func (s *Sensor) Close(ctx context.Context) error
   apart, the last at the read of `FIFO_SRC`. `Close` powers the sensors down
   and leaves the FIFO registers; the next `New` writes Bypass before anything.
 
+**TCS3400** (`chip/tcs3400`, ADR-0009): `New`, `Identify`, `Read`, `Close`.
+
+```go
+type Sample struct {
+	Clear, Red, Green, Blue vane.Measurement[vane.Counts] // raw counts, never lux
+	Gain                    Gain                           // 1, 4, 16, 64
+	IntegrationTime         time.Duration                  // cycles × 2.78 ms
+}
+func (s *Sensor) Variant() Variant // VID: VariantVDDBus (TCS34001/5) or Variant1V8Bus (TCS34003/7)
+func (s *Sensor) Part() string     // from VID and address: "TCS34001" … "TCS34007"
+// Options: WithAddress (0x39 default, 0x29), WithIntegration (1–256 cycles,
+// default 64 = 178 ms), WithGain (default 16×), WithPollInterval,
+// WithReadyTimeout (default 2 × integration + 20 ms), WithBusName, WithClock.
+```
+
+- **One integration per `Read`**: `ENABLE = PON|AEN`, wait for `AVALID`, one
+  8-byte burst of C/R/G/B, `ENABLE = 0` — also after a timeout or a context
+  that ended, with a context that does not end with the caller's.
+- **Reset detection**: `ATIME` and `CONTROL` are read back (one 15-byte burst)
+  before each integration and rewritten if they differ; a reset chip would
+  otherwise integrate at 2.78 ms and 1× with no error.
+- **Flags**: `FlagClamped` on every channel for `ASAT`, on a channel at the
+  integration's maximum count.
+- `regio.NewByteAddressed`: registers 0x80–0xFF.
+
 ### What a driver must not do
 
 - Write before `WHO_AM_I` matches (RF-01).

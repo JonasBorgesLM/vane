@@ -20,7 +20,8 @@ the beacon edge agent, through its own `SensorReader` port.
 - Compensating temperature for CPU heat, dew point, or any derived quantity.
 - Retry, circuit breaking, caching — the consumer's job (bastion, cistern).
 - Serialisation, transport, or any knowledge of beacon.
-- Colour sensor, LED matrix, joystick — not yet (the IMU is `chip/lsm9ds1`, v0.2).
+- LED matrix, joystick — not yet (the IMU is `chip/lsm9ds1`, the colour sensor
+  `chip/tcs3400`; neither is in `sensehat` yet).
 - Logging. vane has no logger and must not import crier or OpenTelemetry.
 
 ## Architecture
@@ -30,7 +31,7 @@ import cycle on the first `go build`):
 
 ```
 sensehat ──▶ chip/hts221, chip/lps25h ──▶ vane (leaf) ◀── i2cdev, vanetest
-             chip/lsm9ds1 (not in sensehat yet, ADR-0008) ──▶ vane
+             chip/lsm9ds1, chip/tcs3400 (not in sensehat yet, ADR-0008/0009) ──▶ vane
                          └──────▶ internal/*
 ```
 

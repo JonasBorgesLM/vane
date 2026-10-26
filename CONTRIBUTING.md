@@ -79,8 +79,8 @@ Refs RF-01, ADR-0003
 Closes #26
 ```
 
-- **Scopes**: `vane hts221 lps25h lsm9ds1 sensehat i2cdev vanetest regio poll
-  kernel probe adr docs deps ci release`. A package without a scope here gets one in
+- **Scopes**: `vane hts221 lps25h lsm9ds1 tcs3400 sensehat i2cdev vanetest regio
+  poll kernel probe adr docs deps ci release`. A package without a scope here gets one in
   the same pull request that creates it.
 - **`!`** marks an incompatible API change. In v0.x it is allowed but never
   silent: the `api-compat` job fails an incompatible change without it, and a

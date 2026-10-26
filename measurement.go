@@ -16,6 +16,7 @@ const (
 	ChipHTS221  Chip = "HTS221"
 	ChipLPS25H  Chip = "LPS25H"
 	ChipLSM9DS1 Chip = "LSM9DS1"
+	ChipTCS3400 Chip = "TCS3400"
 )
 
 // Source identifies where a measurement came from.

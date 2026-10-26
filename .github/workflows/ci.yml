@@ -366,7 +366,7 @@ jobs:
     if: github.event_name == 'pull_request'
     env:
       TYPES: feat|fix|docs|test|refactor|perf|build|ci|chore|revert
-      SCOPES: vane|hts221|lps25h|lsm9ds1|sensehat|i2cdev|vanetest|regio|poll|kernel|probe|adr|docs|deps|ci|release
+      SCOPES: vane|hts221|lps25h|lsm9ds1|tcs3400|sensehat|i2cdev|vanetest|regio|poll|kernel|probe|adr|docs|deps|ci|release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
