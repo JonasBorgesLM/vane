@@ -78,9 +78,9 @@ func (s Step) Failing(chip vane.Chip, err error) Step {
 		e.Humidity = sensehat.Reading[vane.RelativeHumidity]{Measurement: vane.Measurement[vane.RelativeHumidity]{Source: src}, Err: fail}
 	case vane.ChipLPS25H:
 		e.Pressure = sensehat.Reading[vane.Hectopascal]{Measurement: vane.Measurement[vane.Hectopascal]{Source: src}, Err: fail}
-	case vane.ChipLSM9DS1:
-		// Not part of the Environment: sensehat does not read the IMU in v0.3
-		// (ADR-0008), so there is nothing of it to fail.
+	case vane.ChipLSM9DS1, vane.ChipTCS3400:
+		// Not part of the Environment: sensehat reads neither the IMU (ADR-0008)
+		// nor the colour sensor (ADR-0009), so there is nothing of them to fail.
 		return s
 	}
 	for i, t := range e.Temperatures {
