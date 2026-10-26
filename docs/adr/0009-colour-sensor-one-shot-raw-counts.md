@@ -1,7 +1,7 @@
 # ADR-0009: The TCS3400 is read one integration at a time and reported as raw counts with their gain and integration time; vane does not compute lux or colour temperature
 
 ## Status
-Proposed — 2026-10-16
+Accepted — 2026-10-26
 
 ## Context
 The Sense HAT v2 carries an ams TCS3400 colour sensor (#52, G-17). From its
