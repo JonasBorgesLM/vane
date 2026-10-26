@@ -50,3 +50,11 @@ func TestLSM9DS1Model(t *testing.T) {
 		},
 	})
 }
+
+func TestTCS3400Model(t *testing.T) {
+	m := vanetest.NewTCS3400(vanetest.WithConversionPolls(3))
+	conformance.TCS3400(t, conformance.Target{
+		Bus:     vanetest.NewFakeBus(m),
+		Prepare: func() { m.Set(120, 57, 66, 60) },
+	}, 0x39)
+}
