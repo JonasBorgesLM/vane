@@ -558,6 +558,7 @@ type Dev struct{ /* bus, addr, increment scheme, buf [2]byte */ }
 // The increment scheme is fixed per device, never per call (ADR-0008):
 func New(b vane.Bus, addr uint16) *Dev                    // sub-address MSB: HTS221, LPS25H/HB, LSM9DS1 magnetometer
 func NewIncrementByRegister(b vane.Bus, addr uint16) *Dev // a register bit: LSM9DS1 accel/gyro (CTRL_REG8.IF_ADD_INC)
+func NewByteAddressed(b vane.Bus, addr uint16) *Dev       // registers 0x80–0xFF, bit 7 is address, always increments: TCS3400 (ADR-0009)
 func (d *Dev) Read(ctx context.Context, reg uint8) (uint8, error)
 func (d *Dev) Write(ctx context.Context, reg, val uint8) error
 func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error // sets 0x80 only under New; the only place that builds a block sub-address

@@ -100,9 +100,10 @@ check. Release is `.github/workflows/release.yml`, driven by `RELEASING.md`.
 3. **BDU is on in every configuration path** (RF-06). Without it a multi-byte
    read can mix the high byte of one sample with the low byte of the next.
 4. **Multi-byte reads go through `regio.ReadBlock`, on a `Dev` made for the
-   device's increment scheme** (ADR-0008). `regio.New` sets the sub-address MSB
-   (HTS221, LPS25H/HB, LSM9DS1 magnetometer); `regio.NewIncrementByRegister`
-   never does (LSM9DS1 accel/gyro, whose MSB addresses another register).
-   The wrong scheme returns one register repeated, or zeros, and the values
-   still look plausible.
+   device's addressing scheme** (ADR-0008, ADR-0009). `regio.New` sets the
+   sub-address MSB (HTS221, LPS25H/HB, LSM9DS1 magnetometer);
+   `regio.NewIncrementByRegister` never does (LSM9DS1 accel/gyro, whose MSB
+   addresses another register); `regio.NewByteAddressed` takes 0x80–0xFF as
+   the address itself (TCS3400). The wrong scheme returns one register
+   repeated, zeros, or another register, and the values still look plausible.
 5. **No panic in a normal path; no global state; no `init()` registration.**

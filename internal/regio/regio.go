@@ -13,6 +13,9 @@
 //     gyroscope, CTRL_REG8.IF_ADD_INC; on the board, 0x8F read 0x00 instead of
 //     WHO_AM_I). ReadBlock sends the bare address, and the driver keeps the
 //     register bit set.
+//   - NewByteAddressed: the registers are 0x80 to 0xFF, bit 7 is part of the
+//     address, and a burst always increments (the TCS3400; board). Registers
+//     below 0x80 are refused: outside the map, 0x12 read 0x24 on the board.
 package regio
 
 import (
@@ -26,8 +29,8 @@ const (
 	// autoIncrement is the sub-address bit that makes a multi-byte transfer walk
 	// through consecutive registers.
 	autoIncrement = 0x80
-	// maxRegister is the highest register number; bit 7 of the sub-address is
-	// not part of it.
+	// maxRegister is the highest register number of the ST schemes, where bit 7
+	// of the sub-address is not part of it.
 	maxRegister = 0x7F
 )
 
@@ -39,15 +42,16 @@ const (
 // per-chip mutex around every call (ADR-0004), which is also what keeps the
 // scratch buffer from being shared.
 type Dev struct {
-	bus  vane.Bus
-	addr uint16
-	inc  uint8 // OR-ed into the sub-address of a block read
-	buf  [2]byte
+	bus    vane.Bus
+	addr   uint16
+	inc    uint8 // OR-ed into the sub-address of a block read
+	lo, hi uint8 // the registers the device has
+	buf    [2]byte
 }
 
 // New returns a Dev for a device whose sub-address MSB requests auto-increment.
 func New(bus vane.Bus, addr uint16) *Dev {
-	return &Dev{bus: bus, addr: addr, inc: autoIncrement}
+	return &Dev{bus: bus, addr: addr, inc: autoIncrement, hi: maxRegister}
 }
 
 // NewIncrementByRegister returns a Dev for a device whose auto-increment is
@@ -56,12 +60,19 @@ func New(bus vane.Bus, addr uint16) *Dev {
 // driver must keep the device's increment bit set, or a block read returns one
 // register repeated.
 func NewIncrementByRegister(bus vane.Bus, addr uint16) *Dev {
-	return &Dev{bus: bus, addr: addr}
+	return &Dev{bus: bus, addr: addr, hi: maxRegister}
+}
+
+// NewByteAddressed returns a Dev for a device whose registers are 0x80 to 0xFF
+// and whose bursts always increment, such as the TCS3400 (ADR-0009). Bit 7 of a
+// register number is part of the address and is sent as it is.
+func NewByteAddressed(bus vane.Bus, addr uint16) *Dev {
+	return &Dev{bus: bus, addr: addr, lo: 0x80, hi: 0xFF}
 }
 
 // Read returns the value of register reg.
 func (d *Dev) Read(ctx context.Context, reg uint8) (uint8, error) {
-	if err := checkRegister(reg); err != nil {
+	if err := d.check(reg); err != nil {
 		return 0, err
 	}
 	d.buf[0] = reg
@@ -73,7 +84,7 @@ func (d *Dev) Read(ctx context.Context, reg uint8) (uint8, error) {
 
 // Write stores val in register reg.
 func (d *Dev) Write(ctx context.Context, reg, val uint8) error {
-	if err := checkRegister(reg); err != nil {
+	if err := d.check(reg); err != nil {
 		return err
 	}
 	d.buf[0], d.buf[1] = reg, val
@@ -83,7 +94,7 @@ func (d *Dev) Write(ctx context.Context, reg, val uint8) error {
 // ReadBlock fills dst with len(dst) consecutive registers starting at reg, in
 // one transaction, incrementing as the Dev's scheme says.
 func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error {
-	if err := checkRegister(reg); err != nil {
+	if err := d.check(reg); err != nil {
 		return err
 	}
 	if len(dst) == 0 {
@@ -93,12 +104,13 @@ func (d *Dev) ReadBlock(ctx context.Context, reg uint8, dst []byte) error {
 	return d.bus.Tx(ctx, d.addr, d.buf[:1], dst)
 }
 
-// checkRegister rejects a register number that already uses bit 7. Such a value
-// would either be mistaken for an auto-increment request or silently change
-// which register is addressed.
-func checkRegister(reg uint8) error {
-	if reg > maxRegister {
-		return fmt.Errorf("regio: register 0x%02x out of range, the highest is 0x%02x", reg, maxRegister)
+// check rejects a register the device does not have. On the ST schemes that is
+// one using bit 7, which would either be mistaken for an auto-increment request
+// or silently change which register is addressed; on a byte-addressed device,
+// one below 0x80, outside its map.
+func (d *Dev) check(reg uint8) error {
+	if reg < d.lo || reg > d.hi {
+		return fmt.Errorf("regio: register 0x%02x out of range 0x%02x to 0x%02x", reg, d.lo, d.hi)
 	}
 	return nil
 }
