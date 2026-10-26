@@ -141,6 +141,24 @@ func TestHardwareLSM9DS1(t *testing.T) {
 	conformance.LSM9DS1(t, target(t))
 }
 
+// TestHardwareTCS3400 checks the colour sensor at 0x39, the TCS34001 the board
+// carries. Diagnose does not cover it, so sysfs ownership is read first.
+func TestHardwareTCS3400(t *testing.T) {
+	n, ok := kernel.BusNumber(busPath())
+	if !ok {
+		t.Fatalf("%s does not name an I2C adapter", busPath())
+	}
+	switch drv, owned, err := kernel.Owner("/", n, 0x39); {
+	case err != nil:
+		t.Fatalf("kernel ownership of 0x39: %v", err)
+	case owned && os.Getenv("VANE_EXPECT") == "custom":
+		t.Fatalf("VANE_EXPECT=custom: 0x39 is owned by %q, want it free for vane", drv)
+	case owned:
+		t.Skipf("0x39 is owned by %q: not touched", drv)
+	}
+	conformance.TCS3400(t, target(t), 0x39)
+}
+
 // TestHardwareLatency records how long a one-shot Read takes, which docs/hardware.md
 // asks for and the README quotes. It asserts nothing about the numbers.
 func TestHardwareLatency(t *testing.T) {

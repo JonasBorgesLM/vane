@@ -8,6 +8,7 @@ type modelOptions struct {
 	polls     int
 	whoAmI    *uint8
 	staggered bool
+	addr      *uint16
 }
 
 // WithReporter sets where the model reports a protocol violation besides
@@ -22,6 +23,11 @@ func WithConversionPolls(n int) ModelOption { return func(o *modelOptions) { o.p
 // WithWhoAmI makes the model answer its identity register with v, for tests of
 // a driver meeting the wrong chip.
 func WithWhoAmI(v uint8) ModelOption { return func(o *modelOptions) { o.whoAmI = &v } }
+
+// WithModelAddress makes the model answer at addr instead of its default, for
+// a chip that comes at more than one address, such as the TCS3400 (0x39 or
+// 0x29 by variant).
+func WithModelAddress(addr uint16) ModelOption { return func(o *modelOptions) { o.addr = &addr } }
 
 func newModelOptions(opts []ModelOption) modelOptions {
 	var o modelOptions
