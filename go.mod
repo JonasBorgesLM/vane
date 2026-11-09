@@ -8,4 +8,4 @@ module github.com/JonasBorgesLM/vane
 // line is a CHANGELOG entry, never a side effect of `go get`.
 go 1.26.0
 
-require golang.org/x/sys v0.49.0
+require golang.org/x/sys v0.50.0
